@@ -24,6 +24,8 @@
 		"jiti": "2.6.1"
 	},
 	"dependencies": {
-		"obsidian": "latest"
+		"obsidian": "latest",
+		"kdbxweb": "^2.1.1",
+		"hash-wasm": "^4.11.0"
 	}
 }

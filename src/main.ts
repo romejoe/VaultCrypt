@@ -1,5 +1,6 @@
 import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
 import {DEFAULT_SETTINGS, VaultCryptSettings, VaultCryptSettingTab} from "./settings";
+import {KdbxService} from "./kdbx-service";
 
 export interface VaultCryptProfile {
 	id: string;
@@ -19,6 +20,7 @@ export default class VaultCryptPlugin extends Plugin {
 	settings: VaultCryptSettings;
 	statusBarItem: HTMLElement;
 	vaultCryptState: VaultCryptState;
+	kdbxService: KdbxService;
 
 	async onload() {
 		await this.loadSettings();
@@ -27,6 +29,7 @@ export default class VaultCryptPlugin extends Plugin {
 			currentProfile: null,
 			isLocked: true
 		};
+		this.kdbxService = new KdbxService(this.app.vault.adapter);
 
 		// Ensure the .vaultcrypt directory exists
 		await this.ensureVaultCryptDir();
