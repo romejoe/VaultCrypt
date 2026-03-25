@@ -1,5 +1,7 @@
 import { DataAdapter } from 'obsidian';
 import * as kdbxweb from 'kdbxweb';
+import { Int64 } from "kdbxweb";
+import { argon2d, argon2id } from '@noble/hashes/argon2';
 
 export type KdbxVersion = 3 | 4;
 
@@ -34,21 +36,23 @@ export class KdbxService {
 	private currentPath: string | null = null;
 
 	constructor(private adapter: DataAdapter) {
-		kdbxweb.CryptoEngine.setArgon2Impl(
-			async (password, salt, memory, iterations, length, parallelism, type, version): Promise<ArrayBuffer> => {
-				const { argon2id } = await import('hash-wasm');
-				const result = await argon2id({
-					password: new Uint8Array(password),
-					salt: new Uint8Array(salt),
-					parallelism,
-					iterations,
-					memorySize: memory,
-					hashLength: length,
-					outputType: 'binary',
-				});
-				return result.buffer as ArrayBuffer;
-			}
-		);
+		kdbxweb.CryptoEngine.setArgon2Impl((password, salt, memory, iterations, length, parallelism, type, version) => {
+			const argon2 = type === 0 ? argon2d : argon2id;
+
+			const bytes = argon2(
+				new Uint8Array(password),
+				new Uint8Array(salt),
+				{
+					t: iterations,
+					m: memory,
+					p: parallelism,
+					dkLen: length,
+					version,
+				},
+			);
+
+			return Promise.resolve(bytes.buffer);
+		});
 	}
 
 	async createDatabase(
@@ -67,15 +71,15 @@ export class KdbxService {
 			db.setVersion(3);
 			const cfg = { ...DEFAULT_KDF_V3, ...kdfConfig };
 			db.setKdf(kdbxweb.Consts.KdfId.Aes);
-			db.header.kdfParameters?.set('R', kdbxweb.VarDictionary.ValueType.UInt64, cfg.iterations);
+			db.header.kdfParameters?.set('R', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
 		} else {
 			db.setVersion(4);
 			const cfg = { ...DEFAULT_KDF_V4, ...kdfConfig };
 			db.setKdf(kdbxweb.Consts.KdfId.Argon2id);
 			const kdfParams = db.header.kdfParameters;
 			if (kdfParams) {
-				kdfParams.set('I', kdbxweb.VarDictionary.ValueType.UInt64, cfg.iterations);
-				kdfParams.set('M', kdbxweb.VarDictionary.ValueType.UInt64, cfg.memory * 1024);
+				kdfParams.set('I', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
+				kdfParams.set('M', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.memory * 1024));
 				kdfParams.set('P', kdbxweb.VarDictionary.ValueType.UInt32, cfg.parallelism);
 			}
 		}
