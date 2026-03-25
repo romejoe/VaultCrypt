@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "obsidian-vault-crypt",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Obsidian plugin for inline encryption of sensitive values using KeePass-compatible (.kdbx) storage",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

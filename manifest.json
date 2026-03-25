@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "vault-crypt",
+	"name": "VaultCrypt",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "Inline encryption for Obsidian notes using KeePass-compatible (.kdbx) storage",
+	"author": "romejoe",
+	"authorUrl": "https://github.com/romejoe",
 	"isDesktopOnly": false
 }
