@@ -1,95 +1,152 @@
 import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import {DEFAULT_SETTINGS, VaultCryptSettings, VaultCryptSettingTab} from "./settings";
 
-// Remember to rename these classes and interfaces!
+export interface VaultCryptProfile {
+	id: string;
+	name: string;
+	path: string;
+	isLocked: boolean;
+	lastUnlock: Date | null;
+}
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export interface VaultCryptState {
+	profiles: VaultCryptProfile[];
+	currentProfile: VaultCryptProfile | null;
+	isLocked: boolean;
+}
+
+export default class VaultCryptPlugin extends Plugin {
+	settings: VaultCryptSettings;
+	statusBarItem: HTMLElement;
+	vaultCryptState: VaultCryptState;
 
 	async onload() {
 		await this.loadSettings();
+		this.vaultCryptState = {
+			profiles: [],
+			currentProfile: null,
+			isLocked: true
+		};
+
+		// Ensure the .vaultcrypt directory exists
+		await this.ensureVaultCryptDir();
 
 		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
+		this.addRibbonIcon('lock', 'VaultCrypt', (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+			new Notice('VaultCrypt ribbon icon clicked');
 		});
 
 		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+		this.statusBarItem = this.addStatusBarItem();
+		this.updateStatusBar();
 
-		// This adds a simple command that can be triggered anywhere
+		// Register commands
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: 'vault-crypt-unlock-profile',
+			name: 'VaultCrypt: Unlock Profile',
 			callback: () => {
-				new SampleModal(this.app).open();
+				new Notice('VaultCrypt: Unlock Profile command executed');
+				// Stub implementation
 			}
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
+		this.addCommand({
+			id: 'vault-crypt-lock-profile',
+			name: 'VaultCrypt: Lock Profile',
+			callback: () => {
+				new Notice('VaultCrypt: Lock Profile command executed');
+				// Stub implementation
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-lock-all',
+			name: 'VaultCrypt: Lock All',
+			callback: () => {
+				new Notice('VaultCrypt: Lock All command executed');
+				// Stub implementation
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-insert-secret',
+			name: 'VaultCrypt: Insert Secret',
+			callback: () => {
+				new Notice('VaultCrypt: Insert Secret command executed');
+				// Stub implementation
 			}
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
 
 		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
 		// Using this function will automatically remove the event listener when this plugin is disabled.
 		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
+			// new Notice("Click"); // Remove notice for cleaner interface
 		});
 
 		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.registerInterval(window.setInterval(() => {
+			// Auto-lock functionality would go here
+			console.log('VaultCrypt interval check');
+		}, 5 * 60 * 1000));
 
 	}
 
 	onunload() {
+		// Cleanup operations here
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<VaultCryptSettings>);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async ensureVaultCryptDir() {
+		const dirPath = this.settings.general.vaultCryptDir;
+		try {
+			await this.app.vault.adapter.mkdir(dirPath);
+			// Create config file if it doesn't exist
+			const configPath = `${dirPath}/vaultcrypt.config.json`;
+			if (!(await this.app.vault.adapter.exists(configPath))) {
+				await this.app.vault.adapter.write(configPath, JSON.stringify({
+					profiles: [],
+					security: this.settings.security,
+					general: {
+						vaultCryptDir: this.settings.general.vaultCryptDir,
+						defaultProfile: this.settings.general.defaultProfile
+					}
+				}, null, 2));
+			}
+		} catch (e) {
+			console.error('Error creating VaultCrypt directory:', e);
+			new Notice(`Error creating VaultCrypt directory: ${e}`);
+		}
+	}
+
+	updateStatusBar() {
+		let statusText = '🔒 VaultCrypt';
+		if (this.vaultCryptState.currentProfile) {
+			statusText = this.vaultCryptState.isLocked ? '🔒 ' : '🔓 ';
+			statusText += this.vaultCryptState.currentProfile.name;
+		}
+		this.statusBarItem.setText(statusText);
+	}
 }
 
-class SampleModal extends Modal {
+class VaultCryptModal extends Modal {
 	constructor(app: App) {
 		super(app);
 	}
 
 	onOpen() {
 		let {contentEl} = this;
-		contentEl.setText('Woah!');
+		contentEl.setText('VaultCrypt Modal');
 	}
 
 	onClose() {

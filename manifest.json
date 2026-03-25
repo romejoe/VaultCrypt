@@ -1,7 +1,7 @@
 {
-	"id": "vault-crypt",
+	"id": "vaultcrypt",
 	"name": "VaultCrypt",
-	"version": "1.0.0",
+	"version": "0.1.0",
 	"minAppVersion": "0.15.0",
 	"description": "Inline encryption for Obsidian notes using KeePass-compatible (.kdbx) storage",
 	"author": "romejoe",
