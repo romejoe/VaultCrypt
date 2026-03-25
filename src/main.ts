@@ -32,9 +32,10 @@ export default class VaultCryptPlugin extends Plugin {
 		await this.ensureVaultCryptDir();
 
 		// This creates an icon in the left ribbon.
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		this.addRibbonIcon('lock', 'VaultCrypt', (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
-			new Notice('VaultCrypt ribbon icon clicked');
+			new Notice('Vaultcrypt ribbon icon clicked');
 		});
 
 		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
@@ -44,36 +45,45 @@ export default class VaultCryptPlugin extends Plugin {
 		// Register commands
 		this.addCommand({
 			id: 'vault-crypt-unlock-profile',
-			name: 'VaultCrypt: Unlock Profile',
+			name: 'Unlock profile',
 			callback: () => {
-				new Notice('VaultCrypt: Unlock Profile command executed');
+				new Notice('Unlock profile command executed');
+				// Stub implementation
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-unlock-all',
+			name: 'Unlock all profiles',
+			callback: () => {
+				new Notice('Unlock all command executed');
 				// Stub implementation
 			}
 		});
 
 		this.addCommand({
 			id: 'vault-crypt-lock-profile',
-			name: 'VaultCrypt: Lock Profile',
+			name: 'Lock profile',
 			callback: () => {
-				new Notice('VaultCrypt: Lock Profile command executed');
+				new Notice('Lock profile command executed');
 				// Stub implementation
 			}
 		});
 
 		this.addCommand({
 			id: 'vault-crypt-lock-all',
-			name: 'VaultCrypt: Lock All',
+			name: 'Lock all profiles',
 			callback: () => {
-				new Notice('VaultCrypt: Lock All command executed');
+				new Notice('Lock all command executed');
 				// Stub implementation
 			}
 		});
 
 		this.addCommand({
 			id: 'vault-crypt-insert-secret',
-			name: 'VaultCrypt: Insert Secret',
+			name: 'Insert secret',
 			callback: () => {
-				new Notice('VaultCrypt: Insert Secret command executed');
+				new Notice('Insert secret command executed');
 				// Stub implementation
 			}
 		});
@@ -146,7 +156,7 @@ class VaultCryptModal extends Modal {
 
 	onOpen() {
 		let {contentEl} = this;
-		contentEl.setText('VaultCrypt Modal');
+		contentEl.setText('Vaultcrypt modal');
 	}
 
 	onClose() {

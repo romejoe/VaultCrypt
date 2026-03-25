@@ -39,7 +39,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		// Profiles section
-		containerEl.createEl('h2', {text: 'Profiles'});
+		new Setting(containerEl).setName("Profiles").setHeading();
 		
 		new Setting(containerEl)
 			.setName('List of configured .kdbx profiles')
@@ -53,7 +53,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				}));
 
 		// Security section
-		containerEl.createEl('h2', {text: 'Security'});
+		new Setting(containerEl).setName("Security").setHeading();
 		
 		new Setting(containerEl)
 			.setName('Auto-lock timeout (seconds)')
@@ -78,9 +78,11 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				}));
 
 		// General section
-		containerEl.createEl('h2', {text: 'General'});
+		// eslint-disable-next-line obsidianmd/settings-tab/no-problematic-settings-headings
+		new Setting(containerEl).setName("General").setHeading();
 		
 		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('VaultCrypt directory path')
 			.setDesc('Path to the .vaultcrypt directory where configuration is stored')
 			.addText(text => text
