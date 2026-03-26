@@ -124,7 +124,7 @@ export default class VaultCryptPlugin extends Plugin {
 			const oldPaths = this.settings.profiles as unknown as string[];
 			this.settings.profiles = {};
 			if (oldPaths.length > 0) {
-				new Notice("VaultCrypt: Profile paths from the old format were removed. Please re-add your profiles.");
+				new Notice("Profile paths from the old format were removed. Please re-add your profiles.");
 			}
 		}
 
@@ -167,7 +167,7 @@ export default class VaultCryptPlugin extends Plugin {
 		const key = name.toLowerCase();
 		const path = `${this.settings.general.vaultCryptDir}/${key}.kdbx`;
 		await this.kdbxService.createDatabase(path, password, version);
-		await this.kdbxService.closeDatabase();
+		this.kdbxService.closeDatabase();
 		this.settings.profiles[key] = {
 			path,
 			kdbxVersion: version,

@@ -24,16 +24,17 @@ export class AddProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Profile name")
-			.setDesc("Alphanumeric and hyphens only (e.g. my-profile)")
+			.setDesc("Alphanumeric and hyphens only (for example, my-profile)")
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder("my-profile")
 				.onChange(value => { this.name = value; }));
 
 		new Setting(contentEl)
-			.setName("KDBX version")
+			.setName("Database version")
 			.addDropdown(dd => dd
-				.addOption("4", "4 (Argon2id, recommended)")
-				.addOption("3", "3 (AES-KDF)")
+				.addOption("4", "Version 4 (recommended)")
+				.addOption("3", "Version 3")
 				.setValue("4")
 				.onChange(value => { this.version = parseInt(value) as KdbxVersion; }));
 
@@ -54,7 +55,7 @@ export class AddProfileModal extends Modal {
 			});
 
 		this.errorEl = contentEl.createEl("p", { cls: "mod-warning" });
-		this.errorEl.style.display = "none";
+		this.errorEl.addClass("vaultcrypt-hidden");
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
@@ -66,7 +67,7 @@ export class AddProfileModal extends Modal {
 
 	private showError(msg: string) {
 		this.errorEl.textContent = msg;
-		this.errorEl.style.display = "";
+		this.errorEl.removeClass("vaultcrypt-hidden");
 	}
 
 	private async submit() {
@@ -122,7 +123,7 @@ export class EditProfileModal extends Modal {
 		this.titleEl.setText("Edit profile");
 
 		new Setting(contentEl).setName("Profile name").setDesc(this.profileName);
-		new Setting(contentEl).setName("KDBX version").setDesc(String(this.config.kdbxVersion));
+		new Setting(contentEl).setName("Database version").setDesc(String(this.config.kdbxVersion));
 		new Setting(contentEl).setName("Path").setDesc(this.config.path);
 
 		new Setting(contentEl)
@@ -137,13 +138,13 @@ export class EditProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Default field")
-			.setDesc("The field to copy when no field is specified (e.g. password, username)")
+			.setDesc("The field to copy when no field is specified (for example, password or username)")
 			.addText(text => text
 				.setValue(this.defaultField)
 				.onChange(value => { this.defaultField = value; }));
 
 		this.errorEl = contentEl.createEl("p", { cls: "mod-warning" });
-		this.errorEl.style.display = "none";
+		this.errorEl.addClass("vaultcrypt-hidden");
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
@@ -163,7 +164,7 @@ export class EditProfileModal extends Modal {
 			this.onDone();
 		} catch (e) {
 			this.errorEl.textContent = `Error saving: ${e instanceof Error ? e.message : String(e)}`;
-			this.errorEl.style.display = "";
+			this.errorEl.removeClass("vaultcrypt-hidden");
 		}
 	}
 
@@ -198,7 +199,7 @@ export class RenameProfileModal extends Modal {
 				.onChange(value => { this.newName = value; }));
 
 		this.errorEl = contentEl.createEl("p", { cls: "mod-warning" });
-		this.errorEl.style.display = "none";
+		this.errorEl.addClass("vaultcrypt-hidden");
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
@@ -215,7 +216,7 @@ export class RenameProfileModal extends Modal {
 		const nameError = validateProfileName(this.newName, existingNames);
 		if (nameError) {
 			this.errorEl.textContent = nameError;
-			this.errorEl.style.display = "";
+			this.errorEl.removeClass("vaultcrypt-hidden");
 			return;
 		}
 		try {
@@ -224,7 +225,7 @@ export class RenameProfileModal extends Modal {
 			this.onDone();
 		} catch (e) {
 			this.errorEl.textContent = `Error renaming: ${e instanceof Error ? e.message : String(e)}`;
-			this.errorEl.style.display = "";
+			this.errorEl.removeClass("vaultcrypt-hidden");
 		}
 	}
 
@@ -264,7 +265,7 @@ export class DeleteProfileModal extends Modal {
 				.onChange(value => { this.deleteFile = value; }));
 
 		this.errorEl = contentEl.createEl("p", { cls: "mod-warning" });
-		this.errorEl.style.display = "none";
+		this.errorEl.addClass("vaultcrypt-hidden");
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
@@ -281,7 +282,7 @@ export class DeleteProfileModal extends Modal {
 			this.onDone();
 		} catch (e) {
 			this.errorEl.textContent = `Error deleting: ${e instanceof Error ? e.message : String(e)}`;
-			this.errorEl.style.display = "";
+			this.errorEl.removeClass("vaultcrypt-hidden");
 		}
 	}
 

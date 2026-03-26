@@ -72,7 +72,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		if (profileNames.length === 0) {
 			new Setting(containerEl)
 				.setName("No profiles configured")
-				.setDesc("Click 'Add profile' to get started.");
+				.setDesc("Click 'add profile' to get started.");
 		} else {
 			for (const name of profileNames) {
 				const config = profiles[name]!;
