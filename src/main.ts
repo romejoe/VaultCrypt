@@ -10,7 +10,7 @@ import {processVcTokensInDom} from './inline-parser';
 import {buildChipElement} from './chip-component';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
-import {computed, effect, peek, signal, StopEffect, untrack} from "@maverick-js/signals";
+import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {deepFreeze, DeepReadonly} from "./utils";
 
 export type {VaultCryptProfile, VaultCryptState};
@@ -87,6 +87,16 @@ export default class VaultCryptPlugin extends Plugin {
 			this.updateStatusBar();
 			new Notice(`Profile "${id}" is locked`);
 			this.refreshAllEditorChips();
+
+			// This is very heavy-handed, is probably fragile and bad practice, but it works for now.
+			document.querySelectorAll('.vaultcrypt-chip').forEach(el => {
+				el.dispatchEvent(new CustomEvent('vc-token-event', {
+					detail: {
+						type: 'profile-lock',
+						profileId: id,
+					}
+				}));
+			});
 		});
 
 		this.settingsChangeStopEffect = effect(() => {
@@ -397,7 +407,7 @@ export default class VaultCryptPlugin extends Plugin {
 				if (current === value) {
 					navigator.clipboard.writeText('').then(() => {
 						console.debug('[VaultCrypt] Clipboard cleared');
-					}, () =>{
+					}, () => {
 						console.debug('[VaultCrypt] Failed to clear clipboard');
 					});
 				}
@@ -405,7 +415,7 @@ export default class VaultCryptPlugin extends Plugin {
 				// readText may be denied; best-effort clear
 				navigator.clipboard.writeText('').then(() => {
 					console.debug('[VaultCrypt] Clipboard cleared');
-				}, () =>{
+				}, () => {
 					console.debug('[VaultCrypt] Failed to clear clipboard');
 				});
 			});

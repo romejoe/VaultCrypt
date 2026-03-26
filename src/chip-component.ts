@@ -2,163 +2,149 @@ import {Notice} from 'obsidian';
 import {UnlockModal} from './modals';
 import {ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
+import {VcTokenEvent} from "./editor-extension";
+import {effect} from "@maverick-js/signals";
 
 /**
  * Builds an interactive inline chip element for a parsed {{vc:...}} token.
  *
+ * A single root <span> is created and its children are mutated in-place
+ * whenever state changes (locked → masked → revealed → masked …). This is
+ * critical for the CodeMirror live-preview mode, which owns the root element
+ * and would discard any element that replaces it via replaceWith().
+ *
  * State machine:
- *   unknown profile  →  error chip (non-interactive)
+ *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
  *   profile unlocked →  masked chip (copy) ⟷ revealed chip (show value, edit stub, copy)
  */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+	console.log('buildChipElement', token.raw);
 	const profileId = token.profileId.toLowerCase();
 	const profileConfig = plugin.settings.profiles[profileId];
 
+	const root = document.createElement('span');
+
 	if (!profileConfig) {
-		const span = document.createElement('span');
-		span.className = 'vaultcrypt-chip vaultcrypt-chip-error';
-		span.textContent = `⚠ unknown profile: ${token.profileId}`;
-		return span;
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
+		root.textContent = `⚠ unknown profile: ${token.profileId}`;
+		return root;
 	}
 
 	const field = resolveFieldName(token, profileConfig.defaultField);
 	const tooltipPath = `${profileId}/${token.entryPath}#${field}`;
 	const compact = plugin.settings.general.compactChips;
-	console.debug('buildChipElement', token, profileId, field, tooltipPath, compact);
 
-	if (!plugin.sessionService.isUnlocked(profileId)) {
-		return buildLockedChip(token, plugin, tooltipPath, compact);
+	root.title = tooltipPath;
+	effect(() => {
+
+	})
+	root.addEventListener('vc-token-event', (evt: CustomEvent<VcTokenEvent>) => {
+		const detail = evt.detail;
+		if (detail.type === 'profile-lock' && detail.profileId.toLowerCase() === profileId) {
+			renderLocked();
+		}
+	});
+
+	// ── Inner render functions — each clears root's children then repopulates ──
+
+	function renderLocked() {
+		console.log('renderLocked');
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
+		root.replaceChildren();
+		const label = document.createElement('span');
+		label.textContent = compact ? '🔒 ••••••••' : `🔒 ${tooltipPath}`;
+		label.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			new UnlockModal(plugin.app, plugin, profileId, () => renderMasked()).open();
+		});
+
+		root.appendChild(label);
 	}
 
-	return buildMaskedChip(token, plugin, field, tooltipPath, compact);
+	function renderMasked() {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.textContent = '🔒';
+		iconEl.style.cursor = 'pointer';
+		iconEl.addEventListener('click', (evt) => { evt.stopPropagation(); tryReveal(); });
+
+		const dotsEl = document.createElement('span');
+		dotsEl.className = 'vaultcrypt-chip-dots';
+		dotsEl.textContent = '••••••••';
+		dotsEl.style.cursor = 'pointer';
+		dotsEl.addEventListener('click', (evt) => { evt.stopPropagation(); tryReveal(); });
+
+		const copyBtn = makeButton('📋', 'Copy to clipboard');
+		copyBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			copyField(profileId, token.entryPath, field, plugin);
+		});
+
+		root.appendChild(iconEl);
+		root.appendChild(dotsEl);
+		root.appendChild(copyBtn);
+	}
+
+	function renderRevealed(value: string) {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
+		iconEl.textContent = '🔓';
+		iconEl.style.cursor = 'pointer';
+		iconEl.title = 'Click to mask';
+		iconEl.addEventListener('click', (evt) => { evt.stopPropagation(); renderMasked(); });
+
+		const valueEl = document.createElement('span');
+		valueEl.className = 'vaultcrypt-chip-value';
+		valueEl.textContent = value;
+		valueEl.style.cursor = 'pointer';
+		valueEl.title = 'Click to mask';
+		valueEl.addEventListener('click', (evt) => { evt.stopPropagation(); renderMasked(); });
+
+		const editBtn = makeButton('✏️', 'Edit (coming soon)');
+		editBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			new Notice('Edit — coming soon');
+		});
+
+		const copyBtn = makeButton('📋', 'Copy to clipboard');
+		copyBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			copyField(profileId, token.entryPath, field, plugin);
+		});
+
+		root.appendChild(iconEl);
+		root.appendChild(valueEl);
+		if (!compact) root.appendChild(editBtn);
+		root.appendChild(copyBtn);
+	}
+
+	function tryReveal() {
+		const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field);
+		if (value === null || value === undefined) {
+			new Notice('Could not read value — is the profile still unlocked?');
+			return;
+		}
+		renderRevealed(value);
+	}
+
+	// ── Initial render ────────────────────────────────────────────────────────
+
+	if (!plugin.sessionService.isUnlocked(profileId)) {
+		renderLocked();
+	} else {
+		renderMasked();
+	}
+
+	return root;
 }
 
-// ── Private builders ──────────────────────────────────────────────────────────
-
-function buildLockedChip(
-	token: ParsedVcToken,
-	plugin: VaultCryptPlugin,
-	tooltipPath: string,
-	compact: boolean,
-): HTMLElement {
-	const span = document.createElement('span');
-	span.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
-	span.title = tooltipPath;
-	span.textContent = compact ? '🔒 ••••••••' : `🔒 ${tooltipPath}`;
-	span.addEventListener('click', () => {
-		new UnlockModal(plugin.app, plugin, token.profileId.toLowerCase(), () => {
-			const rebuilt = buildChipElement(token, plugin);
-			span.replaceWith(rebuilt);
-		}).open();
-	});
-	return span;
-}
-
-function buildMaskedChip(
-	token: ParsedVcToken,
-	plugin: VaultCryptPlugin,
-	fieldName: string,
-	tooltipPath: string,
-	compact: boolean,
-): HTMLElement {
-	console.log('buildMaskedChip', token, fieldName, tooltipPath, compact);
-	const span = document.createElement('span');
-	span.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
-	span.title = tooltipPath;
-
-	const iconEl = document.createElement('span');
-	iconEl.textContent = '🔒';
-
-	const dotsEl = document.createElement('span');
-	dotsEl.className = 'vaultcrypt-chip-dots';
-	dotsEl.textContent = '••••••••';
-
-	const copyBtn = makeButton('📋', 'Copy to clipboard');
-
-
-	// Clicking the icon/dots area toggles reveal
-	iconEl.style.cursor = 'pointer';
-	dotsEl.style.cursor = 'pointer';
-	iconEl.addEventListener('click', (evt) => {
-		evt.stopPropagation();
-		toggleReveal(span, token, plugin, fieldName, tooltipPath, compact);
-	});
-	dotsEl.addEventListener('click', (evt) => {
-		evt.stopPropagation();
-		toggleReveal(span, token, plugin, fieldName, tooltipPath, compact);
-	});
-
-
-	copyBtn.addEventListener('click', (evt) => {
-		evt.stopPropagation();
-		copyField(token.profileId.toLowerCase(), token.entryPath, fieldName, plugin);
-	});
-
-	span.appendChild(iconEl);
-	span.appendChild(dotsEl);
-	span.appendChild(copyBtn);
-
-	return span;
-}
-
-function buildRevealedChip(
-	token: ParsedVcToken,
-	plugin: VaultCryptPlugin,
-	fieldName: string,
-	tooltipPath: string,
-	value: string,
-	compact: boolean,
-): HTMLElement {
-	console.log('buildRevealedChip', token, fieldName, tooltipPath, value, compact);
-	const span = document.createElement('span');
-	span.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
-	span.title = tooltipPath;
-
-	const iconEl = document.createElement('span');
-	iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
-	iconEl.textContent = '🔓';
-	iconEl.style.cursor = 'cursor';
-	iconEl.title = 'Click to mask';
-
-	const valueEl = document.createElement('span');
-	valueEl.className = 'vaultcrypt-chip-value';
-	valueEl.textContent = value;
-	valueEl.style.cursor = 'pointer';
-	valueEl.title = 'Click to mask';
-
-	const editBtn = makeButton('✏️', 'Edit (coming soon)');
-	const copyBtn = makeButton('📋', 'Copy to clipboard');
-
-	// Click icon or value to re-mask
-	const maskHandler = (evt: MouseEvent) => {
-		console.log('maskHandler', evt);
-		evt.stopPropagation();
-		const masked = buildMaskedChip(token, plugin, fieldName, tooltipPath, compact);
-		span.replaceWith(masked);
-	};
-	iconEl.addEventListener('click', maskHandler);
-	valueEl.addEventListener('click', maskHandler);
-
-	editBtn.addEventListener('click', (evt) => {
-		evt.stopPropagation();
-		new Notice('Edit — coming soon');
-	});
-
-	copyBtn.addEventListener('click', (evt) => {
-		evt.stopPropagation();
-		copyField(token.profileId.toLowerCase(), token.entryPath, fieldName, plugin);
-	});
-
-	span.appendChild(iconEl);
-	span.appendChild(valueEl);
-	if (!compact) span.appendChild(editBtn);
-	span.appendChild(copyBtn);
-
-	return span;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Module-level helpers ───────────────────────────────────────────────────────
 
 function makeButton(emoji: string, title: string): HTMLButtonElement {
 	const btn = document.createElement('button');
@@ -166,25 +152,6 @@ function makeButton(emoji: string, title: string): HTMLButtonElement {
 	btn.textContent = emoji;
 	btn.title = title;
 	return btn;
-}
-
-function toggleReveal(
-	currentChip: HTMLElement,
-	token: ParsedVcToken,
-	plugin: VaultCryptPlugin,
-	fieldName: string,
-	tooltipPath: string,
-	compact: boolean,
-): void {
-	console.debug('toggleReveal', currentChip, token, fieldName, tooltipPath, compact);
-	const profileId = token.profileId.toLowerCase();
-	const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, fieldName);
-	if (value === null || value === undefined) {
-		new Notice('Could not read value — is the profile still unlocked?');
-		return;
-	}
-	const revealed = buildRevealedChip(token, plugin, fieldName, tooltipPath, value, compact);
-	currentChip.replaceWith(revealed);
 }
 
 function copyField(
@@ -203,7 +170,6 @@ function copyField(
 		const secs = plugin.settings.security.clipboardClearSeconds;
 		new Notice(`Copied! Clipboard will clear in ${secs}s`);
 		plugin.scheduleClearClipboardTime(value, secs);
-
 	}).catch(() => {
 		new Notice('Failed to copy to clipboard');
 	});

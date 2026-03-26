@@ -7,21 +7,25 @@ import type VaultCryptPlugin from './main';
 
 /** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
 export const refreshChipsEffect = StateEffect.define<void>();
+export type VcTokenEvent = { type: 'profile-lock', profileId: string };
 
 class VcTokenWidget extends WidgetType {
+	private readonly el: HTMLElement;
+
 	constructor(
 		private readonly token: ParsedVcToken,
 		private readonly plugin: VaultCryptPlugin,
 	) {
 		super();
+		this.el = buildChipElement(this.token, this.plugin);
 	}
 
 	toDOM(): HTMLElement {
-		return buildChipElement(this.token, this.plugin);
+		return this.el;
 	}
 
 	eq(other: VcTokenWidget): boolean {
-		return this === other;
+		return this.token.raw === other.token.raw && this.plugin.sessionService === other.plugin.sessionService;
 	}
 
 	/** Return true so that CodeMirror doesn't steal click events for cursor placement. */
