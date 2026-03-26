@@ -82,11 +82,11 @@ export class KdbxService {
 				kdfParams.set('P', kdbxweb.VarDictionary.ValueType.UInt32, cfg.parallelism);
 			}
 		}
-
-		await this.saveDatabase(path);
 		
 		this.db = db;
 		this.currentPath = path;
+
+		await this.saveDatabase(path);
 	}
 
 	async openDatabase(path: string, password: string): Promise<void> {
