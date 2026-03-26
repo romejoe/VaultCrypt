@@ -11,3 +11,32 @@ If your plugin does not need CSS, delete this file.
 .vaultcrypt-hidden {
 	display: none;
 }
+
+/* Source mode: subtle background highlight on raw {{vc:...}} token */
+.vaultcrypt-token {
+	background-color: rgba(var(--color-accent-rgb), 0.12);
+	border-radius: 3px;
+	padding: 0 2px;
+}
+
+/* Live preview / reading mode: inline chip replacing the token */
+.vaultcrypt-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 0.85em;
+	padding: 1px 6px;
+	border-radius: 10px;
+	background: rgba(var(--color-accent-rgb), 0.15);
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	cursor: default;
+	user-select: none;
+	white-space: nowrap;
+}
+
+/* Error chip for unknown/invalid profile references */
+.vaultcrypt-chip-error {
+	background: rgba(var(--color-red-rgb), 0.15);
+	color: var(--text-error);
+}

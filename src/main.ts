@@ -5,6 +5,8 @@ import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {UnlockModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
+import {buildEditorExtension} from './editor-extension';
+import {processVcTokensInDom} from './inline-parser';
 
 export type {VaultCryptProfile, VaultCryptState};
 
@@ -172,6 +174,14 @@ export default class VaultCryptPlugin extends Plugin {
 				});
 			}
 		}));
+
+		// CodeMirror extension for source / live preview decoration
+		this.registerEditorExtension(buildEditorExtension(this));
+
+		// Reading mode post-processor
+		this.registerMarkdownPostProcessor((el) => {
+			processVcTokensInDom(el, this.settings);
+		});
 
 		// Settings tab
 		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
