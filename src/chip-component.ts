@@ -215,6 +215,8 @@ function copyField(
 
 	navigator.clipboard.writeText(value).then(() => {
 		const secs = plugin.settings.security.clipboardClearSeconds;
+		if (secs === undefined || secs <= 0) return;
+
 		new Notice(`Copied! Clipboard will clear in ${secs}s`);
 		plugin.scheduleClearClipboardTime(value, secs);
 	}).catch(() => {
