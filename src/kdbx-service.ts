@@ -1,7 +1,7 @@
 import { DataAdapter } from 'obsidian';
 import * as kdbxweb from 'kdbxweb';
 import { Int64 } from "kdbxweb";
-import { argon2d, argon2id } from '@noble/hashes/argon2';
+import { argon2d, argon2id } from '@noble/hashes/argon2.js';
 
 export type KdbxVersion = 3 | 4;
 
