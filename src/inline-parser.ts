@@ -1,4 +1,4 @@
-export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:\/([a-zA-Z0-9_-]+))?\}\}/g;
+export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-\/]+?)(?:#([a-zA-Z0-9_-]+))?}}/g;
 
 export interface ParsedVcToken {
 	raw: string;
