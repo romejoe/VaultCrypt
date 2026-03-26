@@ -35,20 +35,21 @@ export class UnlockSessionService {
 		const db = await kdbxweb.Kdbx.load(buffer, credentials);
 		this.openDbs.set(profileId, db);
 		this.scheduleAutoLock(profileId, config.autoLockMinutes);
-		this.unlockCallbacks.forEach(cb => cb(profileId));
+		this.emitUnlock(profileId);
 	}
 
 	/** Removes a profile's database from memory and clears its timer. */
 	lockProfile(profileId: string): void {
-		if (!this.openDbs.has(profileId)) return;
-		this.openDbs.get(profileId)?.cleanup();
-		this.openDbs.delete(profileId);
+		if (this.openDbs.has(profileId)) {
+			this.openDbs.get(profileId)?.cleanup();
+			this.openDbs.delete(profileId);
+		}
 		const timer = this.timers.get(profileId);
 		if (timer !== undefined) {
 			window.clearTimeout(timer);
 			this.timers.delete(profileId);
 		}
-		this.lockCallbacks.forEach(cb => cb(profileId));
+		this.emitLock(profileId);
 	}
 
 	/** Locks all currently unlocked profiles. */
@@ -97,5 +98,25 @@ export class UnlockSessionService {
 			this.lockProfile(profileId);
 		}, ms);
 		this.timers.set(profileId, timer);
+	}
+
+	private emitLock(profileId: string): void {
+		for (const cb of this.lockCallbacks) {
+			try {
+				cb(profileId);
+			} catch (err) {
+				console.error('[VaultCrypt] lock callback failed', err);
+			}
+		}
+	}
+
+	private emitUnlock(profileId: string): void {
+		for (const cb of this.unlockCallbacks) {
+			try {
+				cb(profileId);
+			} catch (err) {
+				console.error('[VaultCrypt] unlock callback failed', err);
+			}
+		}
 	}
 }
