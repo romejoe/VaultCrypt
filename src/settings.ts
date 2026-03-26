@@ -104,9 +104,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.setLimits(30, 1800, 30)
 				.setValue(this.plugin.settings.security.autoLockTimeout)
 				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.security.autoLockTimeout = value;
-					await this.plugin.saveSettings();
+				.onChange((value) => {
+					this.plugin.patchSettings(s => { s.security.autoLockTimeout = value; });
 				}));
 
 		new Setting(containerEl)
@@ -116,9 +115,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.setLimits(1, 60, 1)
 				.setValue(this.plugin.settings.security.clipboardClearSeconds)
 				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.security.clipboardClearSeconds = value;
-					await this.plugin.saveSettings();
+				.onChange((value) => {
+					this.plugin.patchSettings(s => { s.security.clipboardClearSeconds = value; });
 				}));
 
 		// General section
@@ -132,9 +130,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			.addText(text => text
 				.setPlaceholder('.vaultcrypt')
 				.setValue(this.plugin.settings.general.vaultCryptDir)
-				.onChange(async (value) => {
-					this.plugin.settings.general.vaultCryptDir = value;
-					await this.plugin.saveSettings();
+				.onChange((value) => {
+					this.plugin.patchSettings(s => { s.general.vaultCryptDir = value; });
 				}));
 
 		new Setting(containerEl)
@@ -142,13 +139,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			.setDesc('Show only the icon and dots in inline chips, omitting the path text')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.general.compactChips)
-				.onChange(async (value) => {
-					this.plugin.patchSettings((settings) =>{
-						settings.general.compactChips = value;
-					});
-
-					await this.plugin.saveSettings();
-
+				.onChange((value) => {
+					this.plugin.patchSettings(s => { s.general.compactChips = value; });
 				}));
 
 		new Setting(containerEl)
@@ -161,9 +153,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				}
 				dropdown
 					.setValue(this.plugin.settings.general.defaultProfile)
-					.onChange(async (value) => {
-						this.plugin.settings.general.defaultProfile = value;
-						await this.plugin.saveSettings();
+					.onChange((value) => {
+						this.plugin.patchSettings(s => { s.general.defaultProfile = value; });
 					});
 			});
 	}
