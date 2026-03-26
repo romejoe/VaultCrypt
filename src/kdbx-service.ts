@@ -83,9 +83,10 @@ export class KdbxService {
 			}
 		}
 
+		await this.saveDatabase(path);
+		
 		this.db = db;
 		this.currentPath = path;
-		await this.saveDatabase(path);
 	}
 
 	async openDatabase(path: string, password: string): Promise<void> {
@@ -210,7 +211,7 @@ export class KdbxService {
 			if (existing) {
 				current = existing;
 			} else {
-				current = this.db!.createGroup(current, seg);
+				current = this.db!.createGroup(current, seg.toLowerCase());
 			}
 		}
 		return current;
