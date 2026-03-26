@@ -117,7 +117,7 @@ export default class VaultCryptPlugin extends Plugin {
 				const unlocked = this.vaultCryptState.profiles.filter(p => !p.isLocked);
 				if (unlocked.length === 0) {
 					// eslint-disable-next-line obsidianmd/ui/sentence-case
-					new Notice('VaultCrypt: no profiles are currently unlocked.');
+				new Notice('No profiles are currently unlocked.');
 					return;
 				}
 				if (unlocked.length === 1) {
