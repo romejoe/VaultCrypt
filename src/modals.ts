@@ -1,4 +1,4 @@
-import { App, Modal, Setting } from "obsidian";
+import { App, ButtonComponent, Modal, Setting } from "obsidian";
 import VaultCryptPlugin from "./main";
 import { ProfileConfig, validateProfileName } from "./settings";
 import { KdbxVersion } from "./kdbx-service";
@@ -11,6 +11,8 @@ export class AddProfileModal extends Modal {
 	private password = "";
 	private confirmPassword = "";
 	private errorEl: HTMLParagraphElement;
+	private isSubmitting = false;
+	private submitBtn!: ButtonComponent;
 
 	constructor(app: App, plugin: VaultCryptPlugin, onDone: () => void) {
 		super(app);
@@ -59,10 +61,12 @@ export class AddProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton(btn => btn
-				.setButtonText("Add profile")
-				.setCta()
-				.onClick(() => this.submit()));
+			.addButton(btn => {
+				this.submitBtn = btn;
+				btn.setButtonText("Add profile")
+					.setCta()
+					.onClick(() => this.submit());
+			});
 	}
 
 	private showError(msg: string) {
@@ -71,26 +75,26 @@ export class AddProfileModal extends Modal {
 	}
 
 	private async submit() {
+		if (this.isSubmitting) return;
+
+		// Synchronous validation — no guard needed for early exits
 		const existingNames = Object.keys(this.plugin.settings.profiles);
 		const nameError = validateProfileName(this.name, existingNames);
-		if (nameError) {
-			this.showError(nameError);
-			return;
-		}
-		if (!this.password) {
-			this.showError("Master password is required.");
-			return;
-		}
-		if (this.password !== this.confirmPassword) {
-			this.showError("Passwords do not match.");
-			return;
-		}
+		if (nameError) { this.showError(nameError); return; }
+		if (!this.password) { this.showError("Master password is required."); return; }
+		if (this.password !== this.confirmPassword) { this.showError("Passwords do not match."); return; }
+
+		this.isSubmitting = true;
+		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.addProfile(this.name, this.password, this.version);
 			this.close();
 			this.onDone();
 		} catch (e) {
 			this.showError(`Error creating profile: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			this.isSubmitting = false;
+			this.submitBtn.setDisabled(false);
 		}
 	}
 
@@ -107,6 +111,8 @@ export class EditProfileModal extends Modal {
 	private autoLockMinutes: number;
 	private defaultField: string;
 	private errorEl: HTMLParagraphElement;
+	private isSubmitting = false;
+	private submitBtn!: ButtonComponent;
 
 	constructor(app: App, profileName: string, config: ProfileConfig, plugin: VaultCryptPlugin, onDone: () => void) {
 		super(app);
@@ -149,23 +155,32 @@ export class EditProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton(btn => btn
-				.setButtonText("Save")
-				.setCta()
-				.onClick(() => this.submit()));
+			.addButton(btn => {
+				this.submitBtn = btn;
+				btn.setButtonText("Save")
+					.setCta()
+					.onClick(() => this.submit());
+			});
 	}
 
 	private async submit() {
+		if (this.isSubmitting) return;
+
+		this.isSubmitting = true;
+		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.editProfile(this.profileName, {
 				autoLockMinutes: this.autoLockMinutes,
-				defaultField: this.defaultField
+				defaultField: this.defaultField,
 			});
 			this.close();
 			this.onDone();
 		} catch (e) {
 			this.errorEl.textContent = `Error saving: ${e instanceof Error ? e.message : String(e)}`;
 			this.errorEl.removeClass("vaultcrypt-hidden");
+		} finally {
+			this.isSubmitting = false;
+			this.submitBtn.setDisabled(false);
 		}
 	}
 
@@ -180,6 +195,8 @@ export class RenameProfileModal extends Modal {
 	private currentName: string;
 	private newName: string;
 	private errorEl: HTMLParagraphElement;
+	private isSubmitting = false;
+	private submitBtn!: ButtonComponent;
 
 	constructor(app: App, currentName: string, plugin: VaultCryptPlugin, onDone: () => void) {
 		super(app);
@@ -204,14 +221,18 @@ export class RenameProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton(btn => btn
-				.setButtonText("Rename")
-				.setCta()
-				.onClick(() => this.submit()));
+			.addButton(btn => {
+				this.submitBtn = btn;
+				btn.setButtonText("Rename")
+					.setCta()
+					.onClick(() => this.submit());
+			});
 	}
 
 	private async submit() {
-		// Exclude current name from "existing" so a no-op rename isn't blocked
+		if (this.isSubmitting) return;
+
+		// Synchronous validation — exclude current name so a no-op rename isn't blocked
 		const existingNames = Object.keys(this.plugin.settings.profiles)
 			.filter(n => n.toLowerCase() !== this.currentName.toLowerCase());
 		const nameError = validateProfileName(this.newName, existingNames);
@@ -220,6 +241,9 @@ export class RenameProfileModal extends Modal {
 			this.errorEl.removeClass("vaultcrypt-hidden");
 			return;
 		}
+
+		this.isSubmitting = true;
+		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.renameProfile(this.currentName, this.newName);
 			this.close();
@@ -227,6 +251,9 @@ export class RenameProfileModal extends Modal {
 		} catch (e) {
 			this.errorEl.textContent = `Error renaming: ${e instanceof Error ? e.message : String(e)}`;
 			this.errorEl.removeClass("vaultcrypt-hidden");
+		} finally {
+			this.isSubmitting = false;
+			this.submitBtn.setDisabled(false);
 		}
 	}
 
@@ -242,6 +269,8 @@ export class DeleteProfileModal extends Modal {
 	private config: ProfileConfig;
 	private deleteFile = false;
 	private errorEl: HTMLParagraphElement;
+	private isSubmitting = false;
+	private submitBtn!: ButtonComponent;
 
 	constructor(app: App, profileName: string, config: ProfileConfig, plugin: VaultCryptPlugin, onDone: () => void) {
 		super(app);
@@ -270,13 +299,19 @@ export class DeleteProfileModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton(btn => btn
-				.setButtonText("Delete")
-				.setWarning()
-				.onClick(() => this.confirm()));
+			.addButton(btn => {
+				this.submitBtn = btn;
+				btn.setButtonText("Delete")
+					.setWarning()
+					.onClick(() => this.confirm());
+			});
 	}
 
 	private async confirm() {
+		if (this.isSubmitting) return;
+
+		this.isSubmitting = true;
+		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.deleteProfile(this.profileName, this.deleteFile);
 			this.close();
@@ -284,6 +319,9 @@ export class DeleteProfileModal extends Modal {
 		} catch (e) {
 			this.errorEl.textContent = `Error deleting: ${e instanceof Error ? e.message : String(e)}`;
 			this.errorEl.removeClass("vaultcrypt-hidden");
+		} finally {
+			this.isSubmitting = false;
+			this.submitBtn.setDisabled(false);
 		}
 	}
 
