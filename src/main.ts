@@ -1,40 +1,36 @@
 import { Notice, Plugin } from 'obsidian';
-import { DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab } from "./settings";
-import { KdbxService, KdbxVersion } from "./kdbx-service";
+import { DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab } from './settings';
+import { KdbxService, KdbxVersion } from './kdbx-service';
+import { ProfileService } from './profile-service';
+import { VaultCryptProfile, VaultCryptState } from './types';
 
-export interface VaultCryptProfile {
-	id: string;
-	name: string;
-	path: string;
-	kdbxVersion: KdbxVersion;
-	autoLockMinutes: number;
-	isLocked: boolean;
-	lastUnlock: Date | null;
-}
-
-export interface VaultCryptState {
-	profiles: VaultCryptProfile[];
-	currentProfile: VaultCryptProfile | null;
-	isLocked: boolean;
-}
+export type { VaultCryptProfile, VaultCryptState };
 
 export default class VaultCryptPlugin extends Plugin {
 	settings: VaultCryptSettings;
 	statusBarItem: HTMLElement;
 	vaultCryptState: VaultCryptState;
 	kdbxService: KdbxService;
+	profileService: ProfileService;
 
 	async onload() {
 		await this.loadSettings();
 		this.vaultCryptState = {
 			profiles: [],
 			currentProfile: null,
-			isLocked: true
+			isLocked: true,
 		};
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
+		this.profileService = new ProfileService(
+			this.settings,
+			this.app.vault.adapter,
+			this.kdbxService,
+			this.vaultCryptState,
+			() => this.saveSettings(),
+		);
 
 		// Ensure the .vaultcrypt directory exists
-		await this.ensureVaultCryptDir();
+		await this.profileService.ensureVaultCryptDir();
 
 		// This creates an icon in the left ribbon.
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -108,7 +104,6 @@ export default class VaultCryptPlugin extends Plugin {
 			// eslint-disable-next-line no-console
 			console.log('VaultCrypt interval check');
 		}, 5 * 60 * 1000));
-
 	}
 
 	onunload() {
@@ -124,7 +119,7 @@ export default class VaultCryptPlugin extends Plugin {
 			const oldPaths = this.settings.profiles as unknown as string[];
 			this.settings.profiles = {};
 			if (oldPaths.length > 0) {
-				new Notice("Profile paths from the old format were removed. Please re-add your profiles.");
+				new Notice('Profile paths from the old format were removed. Please re-add your profiles.');
 			}
 		}
 
@@ -139,108 +134,26 @@ export default class VaultCryptPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	async ensureVaultCryptDir() {
-		const dirPath = this.settings.general.vaultCryptDir;
-		try {
-			await this.app.vault.adapter.mkdir(dirPath);
-			await this.writeConfigFile();
-		} catch (e) {
-			console.error('Error creating VaultCrypt directory:', e);
-			if (e instanceof Error || typeof e === 'string') {
-				new Notice(`Error creating VaultCrypt directory: ${e}`);
-			}
-		}
-	}
-
-	async writeConfigFile() {
-		const dirPath = this.settings.general.vaultCryptDir;
-		const configPath = `${dirPath}/vaultcrypt.config.json`;
-		const configData = {
-			profiles: this.settings.profiles,
-			masterKeyringPath: this.settings.masterKeyringPath,
-			clipboardClearSeconds: this.settings.security.clipboardClearSeconds
-		};
-		await this.app.vault.adapter.write(configPath, JSON.stringify(configData, null, 2));
-	}
+	// ── Profile delegation ────────────────────────────────────────────────────
 
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
-		const key = name.toLowerCase();
-		const path = `${this.settings.general.vaultCryptDir}/${key}.kdbx`;
-		await this.kdbxService.createDatabase(path, password, version);
-		this.kdbxService.closeDatabase();
-		this.settings.profiles[key] = {
-			path,
-			kdbxVersion: version,
-			autoLockMinutes: 0,
-			defaultField: "password"
-		};
-		await this.saveSettings();
-		await this.writeConfigFile();
+		await this.profileService.addProfile(name, password, version);
 	}
 
 	async editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): Promise<void> {
-		const key = name.toLowerCase();
-		if (!this.settings.profiles[key]) throw new Error(`Profile '${name}' not found.`);
-		Object.assign(this.settings.profiles[key], updates);
-		// Update runtime state if present
-		const runtimeProfile = this.vaultCryptState.profiles.find(p => p.id === key);
-		if (runtimeProfile) {
-			if (updates.autoLockMinutes !== undefined) runtimeProfile.autoLockMinutes = updates.autoLockMinutes;
-		}
-		await this.saveSettings();
-		await this.writeConfigFile();
+		await this.profileService.editProfile(name, updates);
 	}
 
 	async renameProfile(oldName: string, newName: string): Promise<void> {
-		const oldKey = oldName.toLowerCase();
-		const newKey = newName.toLowerCase();
-		if (!this.settings.profiles[oldKey]) throw new Error(`Profile '${oldName}' not found.`);
-		// Copy config under new key, remove old key
-		this.settings.profiles[newKey] = { ...this.settings.profiles[oldKey] };
-		delete this.settings.profiles[oldKey];
-		// Update defaultProfile if it pointed to the old name
-		if (this.settings.general.defaultProfile.toLowerCase() === oldKey) {
-			this.settings.general.defaultProfile = newKey;
-		}
-		// Update runtime state
-		const runtimeProfile = this.vaultCryptState.profiles.find(p => p.id === oldKey);
-		if (runtimeProfile) {
-			runtimeProfile.id = newKey;
-			runtimeProfile.name = newKey;
-		}
-		if (this.vaultCryptState.currentProfile?.id === oldKey) {
-			this.vaultCryptState.currentProfile.id = newKey;
-			this.vaultCryptState.currentProfile.name = newKey;
-		}
-		await this.saveSettings();
-		await this.writeConfigFile();
+		await this.profileService.renameProfile(oldName, newName);
 	}
 
 	async deleteProfile(name: string, deleteFile: boolean): Promise<void> {
-		const key = name.toLowerCase();
-		const config = this.settings.profiles[key];
-		if (!config) throw new Error(`Profile '${name}' not found.`);
-		if (deleteFile) {
-			try {
-				await this.app.vault.adapter.remove(config.path);
-			} catch (e) {
-				// File may not exist — log but don't abort
-				console.warn(`VaultCrypt: could not delete file ${config.path}:`, e);
-			}
-		}
-		delete this.settings.profiles[key];
-		if (this.settings.general.defaultProfile.toLowerCase() === key) {
-			this.settings.general.defaultProfile = "";
-		}
-		// Update runtime state
-		this.vaultCryptState.profiles = this.vaultCryptState.profiles.filter(p => p.id !== key);
-		if (this.vaultCryptState.currentProfile?.id === key) {
-			this.vaultCryptState.currentProfile = null;
-		}
-		await this.saveSettings();
-		await this.writeConfigFile();
+		await this.profileService.deleteProfile(name, deleteFile);
 		this.updateStatusBar();
 	}
+
+	// ── UI helpers ────────────────────────────────────────────────────────────
 
 	updateStatusBar() {
 		let statusText = '🔒 VaultCrypt';
