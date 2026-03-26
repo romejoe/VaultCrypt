@@ -114,6 +114,7 @@ export class UnlockModal extends Modal {
 			this.close();
 			this.onDone?.(this.selectedProfileId);
 		} catch (e) {
+			console.error(e);
 			this.showError(`Incorrect password or corrupted database.`);
 		} finally {
 			this.isSubmitting = false;
