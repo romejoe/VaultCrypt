@@ -74,10 +74,7 @@ If your plugin does not need CSS, delete this file.
 	letter-spacing: 2px;
 }
 
-/* Revealed plaintext value */
-.vaultcrypt-chip-value {
-	cursor: pointer;
-}
+
 
 /* Action buttons (copy, edit) inside a chip */
 .vaultcrypt-chip-btn {
@@ -98,6 +95,24 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-accent);
 }
 
-.vaultcrypt-chip-icon .vaultcrypt-chip-icon-unlocked{
+.vaultcrypt-chip-icon-unlocked{
 	cursor: pointer;
+}
+
+.vaultcrypt-chip-icon-locked{
+	cursor: pointer;
+}
+
+.vaultcrypt-chip-icon-unlocked{
+	cursor: pointer;
+}
+
+.vaultcrypt-chip-dots{
+	cursor: pointer;
+}
+
+/* Revealed plaintext value */
+.vaultcrypt-chip-value{
+	cursor: text;
+	user-select: text;
 }

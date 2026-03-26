@@ -7,7 +7,7 @@ export class UnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private selectedProfileId: string;
 	private password = "";
-	private errorEl: HTMLParagraphElement;
+	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 	private onDone: ((profileId: string) => void) | undefined;
@@ -134,7 +134,7 @@ export class AddProfileModal extends Modal {
 	private version: KdbxVersion = 4;
 	private password = "";
 	private confirmPassword = "";
-	private errorEl: HTMLParagraphElement;
+	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 
@@ -251,7 +251,7 @@ export class EditProfileModal extends Modal {
 	private config: ProfileConfig;
 	private autoLockMinutes: number;
 	private defaultField: string;
-	private errorEl: HTMLParagraphElement;
+	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 
@@ -337,7 +337,7 @@ export class RenameProfileModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private currentName: string;
 	private newName: string;
-	private errorEl: HTMLParagraphElement;
+	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 
@@ -413,7 +413,7 @@ export class DeleteProfileModal extends Modal {
 	private profileName: string;
 	private config: ProfileConfig;
 	private deleteFile = false;
-	private errorEl: HTMLParagraphElement;
+	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 

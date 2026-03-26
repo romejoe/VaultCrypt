@@ -24,6 +24,12 @@ declare module 'obsidian' {
 	}
 }
 
+const DEFAULT_STATE: VaultCryptState = {
+	profiles: [],
+	currentProfile: null,
+	isLocked: true,
+}
+
 export default class VaultCryptPlugin extends Plugin {
 	private settingsChangeStopEffect?: StopEffect;
 
@@ -32,6 +38,7 @@ export default class VaultCryptPlugin extends Plugin {
 		return deepFreeze(structuredClone(this._settings$()));
 	});
 	private clearClipboardTimeouts: number[] = [];
+	private effects: StopEffect[] = [];
 
 
 	get settings(): DeepReadonly<VaultCryptSettings> {
@@ -39,11 +46,19 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	statusBarItem?: HTMLElement;
-	vaultCryptState: VaultCryptState = {
-		profiles: [],
-		currentProfile: null,
-		isLocked: true,
-	};
+	private readonly _vaultCryptState$ = signal<VaultCryptState>(DEFAULT_STATE);
+	readonly vaultCryptState$ = computed(() => {
+		return deepFreeze(structuredClone(this._vaultCryptState$()));
+	});
+
+	/*
+	 * vaultCryptState is the runtime state of the plugin, derived from persisted settings but enriched with volatile properties like isLocked and lastUnlock that aren't stored on disk.
+	 * @deprecated Use vaultCryptState$ instead.
+	 */
+	get vaultCryptState(): DeepReadonly<VaultCryptState> {
+		return peek(this.vaultCryptState$);
+	}
+
 	kdbxService?: KdbxService;
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
@@ -51,11 +66,11 @@ export default class VaultCryptPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		this.vaultCryptState = {
+		this._vaultCryptState$.set({
 			profiles: [],
 			currentProfile: null,
 			isLocked: true,
-		};
+		});
 		// KdbxService must be instantiated first — its constructor registers the
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
@@ -64,9 +79,12 @@ export default class VaultCryptPlugin extends Plugin {
 			this.settings$,
 			this.app.vault.adapter,
 			this.kdbxService,
-			this.vaultCryptState,
+			this.vaultCryptState$,
 			(patcher) => {
 				this.patchSettings(patcher);
+			},
+			(mutator) => {
+				this.mutateState(mutator);
 			}
 		);
 
@@ -79,12 +97,10 @@ export default class VaultCryptPlugin extends Plugin {
 		// Wire session events → sync runtime state + update UI
 		this.sessionService.onUnlock(id => {
 			this.syncProfileLockState(id, false);
-			this.updateStatusBar();
 			this.refreshAllEditorChips();
 		});
 		this.sessionService.onLock(id => {
 			this.syncProfileLockState(id, true);
-			this.updateStatusBar();
 			new Notice(`Profile "${id}" is locked`);
 			this.refreshAllEditorChips();
 
@@ -99,13 +115,7 @@ export default class VaultCryptPlugin extends Plugin {
 			});
 		});
 
-		this.settingsChangeStopEffect = effect(() => {
-			const settings = this._settings$();
-			console.debug('[VaultCrypt] Settings changed:', settings);
-			this.refreshAllEditorChips();
-			this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
-			this.dispatchSaveSettings();
-		});
+		// this.settingsChangeStopEffect = ;
 
 		// Ribbon icon → unlock modal
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -115,13 +125,13 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Status bar
 		this.statusBarItem = this.addStatusBarItem();
-		this.updateStatusBar();
 
 		// Status bar click → lock menu
 		this.registerDomEvent(this.statusBarItem, 'click', (evt: MouseEvent) => {
 			const menu = new Menu();
-			const unlocked = this.vaultCryptState.profiles.filter(p => !p.isLocked);
-			const locked = this.vaultCryptState.profiles.filter(p => p.isLocked);
+			const state = peek(this.vaultCryptState$);
+			const unlocked = state.profiles.filter(p => !p.isLocked);
+			const locked = state.profiles.filter(p => p.isLocked);
 
 			for (const p of locked) {
 				menu.addItem(item => item
@@ -213,13 +223,24 @@ export default class VaultCryptPlugin extends Plugin {
 			if (!file || file.extension !== 'md') return;
 			const content = await this.app.vault.read(file);
 			const matches = [...content.matchAll(/\{\{vc:([^:}]+)/g)];
+
+			const settings = peek(this.settings$);
 			const lockedProfileIds = new Set(
 				matches
-					.map(m => (m[1] ?? '').toLowerCase())
-					.filter(id => this.settings.profiles[id] && !this.sessionService.isUnlocked(id))
+					.map(m => {
+						const identifierString = (m[1] ?? '').toLowerCase();
+						const profileIdEndIndex = identifierString.indexOf("/");
+
+						const profileId = profileIdEndIndex < 0 ? '' : identifierString.substring(0, profileIdEndIndex);
+						if (profileId in settings.profiles) {
+							return profileId;
+						}
+						return '';
+					})
+					.filter(identifierString => !this.sessionService.isUnlocked(identifierString))
 			);
 			for (const profileId of lockedProfileIds) {
-				const notice = new Notice(`Profile "${profileId}" is locked. `, 0);
+				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
 				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
 				btn.addEventListener('click', () => {
 					notice.hide();
@@ -229,8 +250,7 @@ export default class VaultCryptPlugin extends Plugin {
 		}));
 
 		// CodeMirror extension for source / live preview decoration
-		this.editorExtension = buildEditorExtension(this);
-		this.registerEditorExtension(this.editorExtension);
+		this.registerEditorExtension(buildEditorExtension(this));
 
 		// Reading mode post-processor
 		this.registerMarkdownPostProcessor((el) => {
@@ -239,10 +259,38 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Settings tab
 		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
+
+		this.effects = [
+			effect(() => {
+				const settings = this._settings$();
+				console.debug('[VaultCrypt] Settings changed:', settings);
+				this.refreshAllEditorChips();
+				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
+				this.dispatchSaveSettings();
+			}),
+			effect(() => {
+				console.debug('[VaultCrypt] vaultCryptState changed:', this.vaultCryptState$());
+				const profiles = this.vaultCryptState$().profiles;
+				if (!this.statusBarItem) {
+					return;
+				}
+				if (profiles.length === 0) {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					this.statusBarItem.setText('🔒 VaultCrypt');
+					return;
+				}
+				const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
+				this.statusBarItem.setText(parts.join(' | '));
+			})
+		]
+
 	}
 
 	onunload() {
 		this.settingsChangeStopEffect?.();
+		for (const effect of this.effects) {
+			effect?.();
+		}
 		for (const timeoutId of this.clearClipboardTimeouts) {
 			window.clearTimeout(timeoutId);
 		}
@@ -280,7 +328,6 @@ export default class VaultCryptPlugin extends Plugin {
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
 		await this.profileService?.addProfile(name, password, version);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	async editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): Promise<void> {
@@ -290,7 +337,6 @@ export default class VaultCryptPlugin extends Plugin {
 	async renameProfile(oldName: string, newName: string): Promise<void> {
 		await this.profileService.renameProfile(oldName, newName);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	async deleteProfile(name: string, deleteFile: boolean): Promise<void> {
@@ -299,7 +345,6 @@ export default class VaultCryptPlugin extends Plugin {
 		this.sessionService.lockProfile(key);
 		await this.profileService.deleteProfile(name, deleteFile);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	// ── Runtime state ─────────────────────────────────────────────────────────
@@ -309,35 +354,40 @@ export default class VaultCryptPlugin extends Plugin {
 	 * the current lock/unlock state of profiles that are already open.
 	 */
 	private initRuntimeState(): void {
-		this.vaultCryptState.profiles = Object.entries(this.settings.profiles).map(([id, cfg]) => {
-			const existing = this.vaultCryptState.profiles.find(p => p.id === id);
-			return {
-				id,
-				name: id,
-				path: cfg.path,
-				kdbxVersion: cfg.kdbxVersion,
-				autoLockMinutes: cfg.autoLockMinutes,
-				isLocked: existing ? existing.isLocked : !this.sessionService.isUnlocked(id),
-				lastUnlock: existing?.lastUnlock ?? null,
-			};
-		});
-		// currentProfile: keep if still present, otherwise null
-		if (this.vaultCryptState.currentProfile) {
-			const still = this.vaultCryptState.profiles.find(
-				p => p.id === this.vaultCryptState.currentProfile!.id
-			);
-			this.vaultCryptState.currentProfile = still ?? null;
-		}
+		this.mutateState(state => {
+			state.profiles = Object.entries(this.settings.profiles).map(([id, cfg]) => {
+				const existing = state.profiles.find(p => p.id === id);
+				return {
+					id,
+					name: id,
+					path: cfg.path,
+					kdbxVersion: cfg.kdbxVersion,
+					autoLockMinutes: cfg.autoLockMinutes,
+					isLocked: existing ? existing.isLocked : !this.sessionService.isUnlocked(id),
+					lastUnlock: existing?.lastUnlock ?? null,
+				};
+			});
+			// currentProfile: keep if still present, otherwise null
+			if (state.currentProfile) {
+				const still = state.profiles.find(
+					p => p.id === state.currentProfile!.id
+				);
+				state.currentProfile = still ?? null;
+			}
+		})
+
 	}
 
 	/** Updates the isLocked flag and lastUnlock date for a profile in runtime state. */
 	private syncProfileLockState(profileId: string, isLocked: boolean): void {
-		const profile = this.vaultCryptState.profiles.find(p => p.id === profileId);
-		if (!profile) return;
-		profile.isLocked = isLocked;
-		if (!isLocked) profile.lastUnlock = new Date();
-		// Keep the top-level isLocked in sync (true only when all profiles are locked)
-		this.vaultCryptState.isLocked = this.vaultCryptState.profiles.every(p => p.isLocked);
+		this.mutateState(state => {
+			const profile = state.profiles.find(p => p.id === profileId);
+			if (!profile) return;
+			profile.isLocked = isLocked;
+			if (!isLocked) profile.lastUnlock = new Date();
+			// Keep the top-level isLocked in sync (true only when all profiles are locked)
+			state.isLocked = state.profiles.every(p => p.isLocked);
+		});
 	}
 
 	/**
@@ -368,20 +418,6 @@ export default class VaultCryptPlugin extends Plugin {
 			}
 			cm.dispatch({effects: refreshChipsEffect.of(undefined)});
 		});
-	}
-
-	updateStatusBar() {
-		const profiles = this.vaultCryptState.profiles;
-		if (!this.statusBarItem) {
-			return;
-		}
-		if (profiles.length === 0) {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			this.statusBarItem.setText('🔒 VaultCrypt');
-			return;
-		}
-		const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
-		this.statusBarItem.setText(parts.join(' | '));
 	}
 
 	patchSettings(patcher: (settings: VaultCryptSettings) => void) {
@@ -424,5 +460,11 @@ export default class VaultCryptPlugin extends Plugin {
 		}, secs * 1000)
 		this.clearClipboardTimeouts.push(timeoutId);
 
+	}
+
+	private mutateState(mutator: (state: VaultCryptState) => void) {
+		const newState = structuredClone(peek(this._vaultCryptState$));
+		mutator(newState);
+		this._vaultCryptState$.set(newState);
 	}
 }

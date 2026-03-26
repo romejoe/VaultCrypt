@@ -15,8 +15,9 @@ export class ProfileService {
 		private settings: ReadSignal<DeepReadonly<VaultCryptSettings>>,
 		private adapter: DataAdapter,
 		private kdbxService: KdbxService,
-		private state: VaultCryptState,
+		private state: ReadSignal<DeepReadonly<VaultCryptState>>,
 		private patchSettings: (patcher: (settings: VaultCryptSettings) => void) => void,
+		private mutateState: (mutator: (state: VaultCryptState) => void) => void,
 	) {
 	}
 
@@ -81,10 +82,13 @@ export class ProfileService {
 		});
 
 		// Sync runtime state if the profile is currently loaded
-		const runtimeProfile = this.state.profiles.find(p => p.id === key);
-		if (runtimeProfile && updates.autoLockMinutes !== undefined) {
-			runtimeProfile.autoLockMinutes = updates.autoLockMinutes;
-		}
+		this.mutateState((state) => {
+			const runtimeProfile = state.profiles.find(p => p.id === key);
+			if (runtimeProfile && updates.autoLockMinutes !== undefined) {
+				runtimeProfile.autoLockMinutes = updates.autoLockMinutes;
+			}
+		});
+
 		await this.writeConfigFile();
 	}
 
@@ -106,16 +110,19 @@ export class ProfileService {
 			}
 		})
 
-		// Update runtime state
-		const runtimeProfile = this.state.profiles.find(p => p.id === oldKey);
-		if (runtimeProfile) {
-			runtimeProfile.id = newKey;
-			runtimeProfile.name = newKey;
-		}
-		if (this.state.currentProfile?.id === oldKey) {
-			this.state.currentProfile.id = newKey;
-			this.state.currentProfile.name = newKey;
-		}
+		this.mutateState((state) => {
+			// Update runtime state
+			const runtimeProfile = state.profiles.find(p => p.id === oldKey);
+			if (runtimeProfile) {
+				runtimeProfile.id = newKey;
+				runtimeProfile.name = newKey;
+			}
+			if (state.currentProfile?.id === oldKey) {
+				state.currentProfile.id = newKey;
+				state.currentProfile.name = newKey;
+			}
+		});
+
 		await this.writeConfigFile();
 	}
 
@@ -146,12 +153,14 @@ export class ProfileService {
 				console.warn(`VaultCrypt: could not delete file ${config.path}:`, e);
 			}
 		}
+		this.mutateState(state => {
+			// Update runtime state
+			state.profiles = state.profiles.filter(p => p.id !== key);
+			if (state.currentProfile?.id === key) {
+				state.currentProfile = null;
+			}
+		})
 
-		// Update runtime state
-		this.state.profiles = this.state.profiles.filter(p => p.id !== key);
-		if (this.state.currentProfile?.id === key) {
-			this.state.currentProfile = null;
-		}
 		await this.writeConfigFile();
 	}
 }

@@ -87,7 +87,6 @@ export class UnlockSessionService {
 	 * entry/field cannot be found.
 	 */
 	getFieldValue(profileId: string, entryPath: string, fieldName: string): string | null {
-		console.log('getFieldValue', profileId, entryPath, fieldName);
 		const db = this.getDatabase(profileId);
 		if (!db) return null;
 
