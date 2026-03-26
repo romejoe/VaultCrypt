@@ -19,12 +19,19 @@ import {computed, effect, peek, signal} from "@maverick-js/signals";
  */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
-	const profileConfig = computed(() =>{
+
+	const profileConfig = computed(() => {
 		return plugin.settings$().profiles[profileId];
 	});
+
 	const compact = computed(() => {
 		return plugin.settings$().general.compactChips;
-	})
+	});
+
+	const autoUnmask = computed(() => {
+		return plugin.settings$().general.autoUnmask;
+	});
+
 	const root = document.createElement('span');
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown'>('locked');
 
@@ -35,13 +42,13 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	});
 
 	const tooltipPath = computed(() => {
-			return `${profileId}/${token.entryPath}#${field()}`;
+		return `${profileId}/${token.entryPath}#${field()}`;
 	})
+
 
 	effect(() => {
 		root.title = tooltipPath();
 	});
-
 
 
 	effect(() => {
@@ -51,10 +58,18 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const profileLocked = pluginState.profiles.find(profile => {
 			return profile.id === profileId;
 		})?.isLocked ?? true;
+
 		if (profileLocked) {
 			chipState.set('locked');
-		} else if (currentState === 'locked') {
-			chipState.set('masked');
+			return;
+		}
+
+		if (currentState === 'unknown' || currentState === 'revealed') {
+			return;
+		}
+
+		if (currentState === 'locked') {
+			chipState.set(peek(autoUnmask) ? 'revealed' : 'masked');
 		}
 	});
 

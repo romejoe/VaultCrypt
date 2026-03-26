@@ -21,6 +21,7 @@ export interface VaultCryptSettings {
 		vaultCryptDir: string;
 		defaultProfile: string;
 		compactChips: boolean;
+		autoUnmask: boolean;
 	};
 }
 
@@ -35,6 +36,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		vaultCryptDir: ".vaultcrypt",
 		defaultProfile: "",
 		compactChips: false,
+		autoUnmask: false,
 	}
 }
 
@@ -144,6 +146,15 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			.setName('Auto unmask chips')
+			.setDesc('Automatically unmask secrets in chips on unlock (not recommended for high-security environments)')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.general.autoUnmask)
+				.onChange((value) => {
+					this.plugin.patchSettings(s => { s.general.autoUnmask = value; });
+				}));
+
+		new Setting(containerEl)
 			.setName('Default profile')
 			.setDesc('The default profile to use for unlocking')
 			.addDropdown(dropdown => {
@@ -159,3 +170,4 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			});
 	}
 }
+
