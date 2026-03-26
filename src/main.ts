@@ -1,6 +1,6 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, VaultCryptSettings, VaultCryptSettingTab} from "./settings";
-import {KdbxService} from "./kdbx-service";
+import { Notice, Plugin } from 'obsidian';
+import { DEFAULT_SETTINGS, VaultCryptSettings, VaultCryptSettingTab } from "./settings";
+import { KdbxService } from "./kdbx-service";
 
 export interface VaultCryptProfile {
 	id: string;
@@ -103,6 +103,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
 		this.registerInterval(window.setInterval(() => {
 			// Auto-lock functionality would go here
+			// eslint-disable-next-line no-console
 			console.log('VaultCrypt interval check');
 		}, 5 * 60 * 1000));
 
@@ -138,7 +139,9 @@ export default class VaultCryptPlugin extends Plugin {
 			}
 		} catch (e) {
 			console.error('Error creating VaultCrypt directory:', e);
-			new Notice(`Error creating VaultCrypt directory: ${e}`);
+			if (e instanceof Error || typeof e === 'string') {
+				new Notice(`Error creating VaultCrypt directory: ${e}`);
+			}
 		}
 	}
 
@@ -149,21 +152,5 @@ export default class VaultCryptPlugin extends Plugin {
 			statusText += this.vaultCryptState.currentProfile.name;
 		}
 		this.statusBarItem.setText(statusText);
-	}
-}
-
-class VaultCryptModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Vaultcrypt modal');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
 	}
 }
