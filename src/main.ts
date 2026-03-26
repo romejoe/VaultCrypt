@@ -63,7 +63,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.updateStatusBar();
 
 		// Status bar click → lock menu
-		this.statusBarItem.addEventListener('click', (evt: MouseEvent) => {
+		this.registerDomEvent(this.statusBarItem, 'click', (evt: MouseEvent) => {
 			const menu = new Menu();
 			const unlocked = this.vaultCryptState.profiles.filter(p => !p.isLocked);
 			const locked = this.vaultCryptState.profiles.filter(p => p.isLocked);
