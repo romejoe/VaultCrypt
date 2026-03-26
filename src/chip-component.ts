@@ -23,9 +23,9 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	}
 
 	const field = resolveFieldName(token, profileConfig.defaultField);
-	const tooltipPath = `${profileId}/${token.entryPath}/${field}`;
+	const tooltipPath = `${profileId}/${token.entryPath}#${field}`;
 	const compact = plugin.settings.general.compactChips;
-	console.log('buildChipElement', token, profileId, field, tooltipPath, compact);
+	console.debug('buildChipElement', token, profileId, field, tooltipPath, compact);
 
 	if (!plugin.sessionService.isUnlocked(profileId)) {
 		return buildLockedChip(token, plugin, tooltipPath, compact);
@@ -110,13 +110,15 @@ function buildRevealedChip(
 	value: string,
 	compact: boolean,
 ): HTMLElement {
+	console.log('buildRevealedChip', token, fieldName, tooltipPath, value, compact);
 	const span = document.createElement('span');
 	span.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
 	span.title = tooltipPath;
 
 	const iconEl = document.createElement('span');
+	iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
 	iconEl.textContent = '🔓';
-	iconEl.style.cursor = 'pointer';
+	iconEl.style.cursor = 'cursor';
 	iconEl.title = 'Click to mask';
 
 	const valueEl = document.createElement('span');
@@ -130,6 +132,7 @@ function buildRevealedChip(
 
 	// Click icon or value to re-mask
 	const maskHandler = (evt: MouseEvent) => {
+		console.log('maskHandler', evt);
 		evt.stopPropagation();
 		const masked = buildMaskedChip(token, plugin, fieldName, tooltipPath, compact);
 		span.replaceWith(masked);
@@ -173,7 +176,7 @@ function toggleReveal(
 	tooltipPath: string,
 	compact: boolean,
 ): void {
-	console.log('toggleReveal', currentChip, token, fieldName, tooltipPath, compact);
+	console.debug('toggleReveal', currentChip, token, fieldName, tooltipPath, compact);
 	const profileId = token.profileId.toLowerCase();
 	const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, fieldName);
 	if (value === null || value === undefined) {

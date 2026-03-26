@@ -1,4 +1,4 @@
-import {MarkdownView, Menu, Notice, Plugin, TFile} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Plugin, TFile} from 'obsidian';
 import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
@@ -15,6 +15,15 @@ import {deepFreeze, DeepReadonly} from "./utils";
 
 export type {VaultCryptProfile, VaultCryptState};
 
+declare module 'obsidian' {
+	interface View {
+		// Expose the EditorView on the Obsidian MarkdownView for our editor extension to consume.
+		editor?: Editor & {
+			cm?: EditorView;
+		}
+	}
+}
+
 export default class VaultCryptPlugin extends Plugin {
 	private settingsChangeStopEffect?: StopEffect;
 
@@ -30,10 +39,14 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	statusBarItem?: HTMLElement;
-	vaultCryptState?: VaultCryptState;
+	vaultCryptState: VaultCryptState = {
+		profiles: [],
+		currentProfile: null,
+		isLocked: true,
+	};
 	kdbxService?: KdbxService;
-	profileService?: ProfileService;
-	sessionService?: UnlockSessionService;
+	profileService!: ProfileService;
+	sessionService!: UnlockSessionService;
 	private editorExtension?: Extension;
 
 	async onload() {
@@ -78,7 +91,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 		this.settingsChangeStopEffect = effect(() => {
 			const settings = this._settings$();
-			console.debug('Settings changed:', settings);
+			console.debug('[VaultCrypt] Settings changed:', settings);
 			this.refreshAllEditorChips();
 			this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
 			this.dispatchSaveSettings();
@@ -338,15 +351,20 @@ export default class VaultCryptPlugin extends Plugin {
 	private refreshAllEditorChips(): void {
 		this.app.workspace.iterateAllLeaves(leaf => {
 			// Obsidian wraps the CodeMirror EditorView as editor.cm (semi-private)
-			const cm: EditorView | undefined = (leaf.view as any)?.editor?.cm;
-			if (cm) {
-				cm.dispatch({effects: refreshChipsEffect.of(undefined)});
+			const cm: EditorView | undefined = leaf.view?.editor?.cm;
+			if (!cm) {
+				console.debug('[VaultCrypt] No CodeMirror editor found in leaf:', leaf);
+				return;
 			}
+			cm.dispatch({effects: refreshChipsEffect.of(undefined)});
 		});
 	}
 
 	updateStatusBar() {
 		const profiles = this.vaultCryptState.profiles;
+		if (!this.statusBarItem) {
+			return;
+		}
 		if (profiles.length === 0) {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			this.statusBarItem.setText('🔒 VaultCrypt');
@@ -365,7 +383,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 	private dispatchSaveSettings() {
 		this.saveSettings().then(() => {
-			console.debug('Settings saved successfully');
+			console.debug('[VaultCrypt] Settings saved successfully');
 		}, (err) => {
 			console.error('Error saving settings:', err);
 			new Notice('Error saving settings. Please check the console for details.');
@@ -376,10 +394,20 @@ export default class VaultCryptPlugin extends Plugin {
 		if (secs === undefined || secs <= 0) return;
 		const timeoutId = window.setTimeout(() => {
 			navigator.clipboard.readText().then(current => {
-				if (current === value) navigator.clipboard.writeText('');
+				if (current === value) {
+					navigator.clipboard.writeText('').then(() => {
+						console.debug('[VaultCrypt] Clipboard cleared');
+					}, () =>{
+						console.debug('[VaultCrypt] Failed to clear clipboard');
+					});
+				}
 			}).catch(() => {
 				// readText may be denied; best-effort clear
-				navigator.clipboard.writeText('');
+				navigator.clipboard.writeText('').then(() => {
+					console.debug('[VaultCrypt] Clipboard cleared');
+				}, () =>{
+					console.debug('[VaultCrypt] Failed to clear clipboard');
+				});
 			});
 			this.clearClipboardTimeouts = this.clearClipboardTimeouts.filter(id => id !== timeoutId);
 

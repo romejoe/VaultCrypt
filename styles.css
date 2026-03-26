@@ -97,3 +97,7 @@ If your plugin does not need CSS, delete this file.
 	opacity: 1;
 	color: var(--text-accent);
 }
+
+.vaultcrypt-chip-icon .vaultcrypt-chip-icon-unlocked{
+	cursor: pointer;
+}
