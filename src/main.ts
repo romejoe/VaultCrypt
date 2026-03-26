@@ -1,12 +1,12 @@
-import { Menu, Notice, Plugin, TFile } from 'obsidian';
-import { DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab } from './settings';
-import { KdbxService, KdbxVersion } from './kdbx-service';
-import { ProfileService } from './profile-service';
-import { UnlockSessionService } from './unlock-session';
-import { UnlockModal } from './modals';
-import { VaultCryptProfile, VaultCryptState } from './types';
+import {Menu, Notice, Plugin, TFile} from 'obsidian';
+import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
+import {KdbxService, KdbxVersion} from './kdbx-service';
+import {ProfileService} from './profile-service';
+import {UnlockSessionService} from './unlock-session';
+import {UnlockModal} from './modals';
+import {VaultCryptProfile, VaultCryptState} from './types';
 
-export type { VaultCryptProfile, VaultCryptState };
+export type {VaultCryptProfile, VaultCryptState};
 
 export default class VaultCryptPlugin extends Plugin {
 	settings: VaultCryptSettings;
@@ -49,7 +49,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.sessionService.onLock(id => {
 			this.syncProfileLockState(id, true);
 			this.updateStatusBar();
-			new Notice(`VaultCrypt: profile "${id}" locked`);
+			new Notice(`Profile "${id}" is locked`);
 		});
 
 		// Ribbon icon → unlock modal
@@ -116,8 +116,7 @@ export default class VaultCryptPlugin extends Plugin {
 			callback: () => {
 				const unlocked = this.vaultCryptState.profiles.filter(p => !p.isLocked);
 				if (unlocked.length === 0) {
-					// eslint-disable-next-line obsidianmd/ui/sentence-case
-				new Notice('No profiles are currently unlocked.');
+					new Notice('No profiles are currently unlocked.');
 					return;
 				}
 				if (unlocked.length === 1) {
@@ -133,7 +132,7 @@ export default class VaultCryptPlugin extends Plugin {
 						.onClick(() => this.sessionService.lockProfile(p.id)));
 				}
 				// Position near the status bar (approximate)
-				menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight - 40 });
+				menu.showAtPosition({x: window.innerWidth / 2, y: window.innerHeight - 40});
 			}
 		});
 
@@ -165,8 +164,8 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter(id => this.settings.profiles[id] && !this.sessionService.isUnlocked(id))
 			);
 			for (const profileId of lockedProfileIds) {
-				const notice = new Notice(`VaultCrypt: profile "${profileId}" is locked. `, 0);
-				const btn = notice.messageEl.createEl('button', { text: 'Unlock' });
+				const notice = new Notice(`Profile "${profileId}" is locked. `, 0);
+				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
 				btn.addEventListener('click', () => {
 					notice.hide();
 					new UnlockModal(this.app, this, profileId).open();
