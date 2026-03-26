@@ -146,6 +146,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 	async renameProfile(oldName: string, newName: string): Promise<void> {
 		await this.profileService.renameProfile(oldName, newName);
+		this.updateStatusBar();
 	}
 
 	async deleteProfile(name: string, deleteFile: boolean): Promise<void> {
