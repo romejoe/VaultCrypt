@@ -12,7 +12,6 @@ export interface KdfConfig {
 }
 
 export interface EntryFields {
-	Title?: string;
 	UserName?: string;
 	Password?: string;
 	URL?: string;
@@ -94,7 +93,7 @@ export class KdbxService {
 			kdbxweb.ProtectedValue.fromString(password)
 		);
 		const buffer = await this.adapter.readBinary(path);
-		this.db = await kdbxweb.Kdbx.load(buffer as ArrayBuffer, credentials);
+		this.db = await kdbxweb.Kdbx.load(buffer, credentials);
 		this.currentPath = path;
 	}
 
@@ -135,6 +134,7 @@ export class KdbxService {
 		}
 
 		for (const [key, value] of Object.entries(fields)) {
+			if (key.toLowerCase() === 'title') continue; // Title is determined by the path segment, ignore field value
 			if (value === undefined) continue;
 			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
 				? kdbxweb.ProtectedValue.fromString(value)
