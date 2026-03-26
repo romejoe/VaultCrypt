@@ -1,6 +1,6 @@
-import { DataAdapter } from 'obsidian';
+import {DataAdapter} from 'obsidian';
 import * as kdbxweb from 'kdbxweb';
-import { ProfileConfig } from './settings';
+import {ProfileConfig} from './settings';
 
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
@@ -19,10 +19,15 @@ export class UnlockSessionService {
 	private lockCallbacks: LockCallback[] = [];
 	private unlockCallbacks: UnlockCallback[] = [];
 
-	constructor(private adapter: DataAdapter) {}
+	constructor(private adapter: DataAdapter) {
+	}
 
 	/** Opens a KDBX database and stores it in the session. Throws on wrong password. */
 	async unlockProfile(profileId: string, config: ProfileConfig, password: string): Promise<void> {
+		// If already unlocked, lock first to cleanup the old session
+		if (this.openDbs.has(profileId)) {
+			this.lockProfile(profileId);
+		}
 		const buffer = await this.adapter.readBinary(config.path);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
@@ -36,6 +41,7 @@ export class UnlockSessionService {
 	/** Removes a profile's database from memory and clears its timer. */
 	lockProfile(profileId: string): void {
 		if (!this.openDbs.has(profileId)) return;
+		this.openDbs.get(profileId)?.cleanup();
 		this.openDbs.delete(profileId);
 		const timer = this.timers.get(profileId);
 		if (timer !== undefined) {
