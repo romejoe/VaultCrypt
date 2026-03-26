@@ -1,38 +1,36 @@
 import { Notice, Plugin } from 'obsidian';
-import { DEFAULT_SETTINGS, VaultCryptSettings, VaultCryptSettingTab } from "./settings";
-import { KdbxService } from "./kdbx-service";
+import { DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab } from './settings';
+import { KdbxService, KdbxVersion } from './kdbx-service';
+import { ProfileService } from './profile-service';
+import { VaultCryptProfile, VaultCryptState } from './types';
 
-export interface VaultCryptProfile {
-	id: string;
-	name: string;
-	path: string;
-	isLocked: boolean;
-	lastUnlock: Date | null;
-}
-
-export interface VaultCryptState {
-	profiles: VaultCryptProfile[];
-	currentProfile: VaultCryptProfile | null;
-	isLocked: boolean;
-}
+export type { VaultCryptProfile, VaultCryptState };
 
 export default class VaultCryptPlugin extends Plugin {
 	settings: VaultCryptSettings;
 	statusBarItem: HTMLElement;
 	vaultCryptState: VaultCryptState;
 	kdbxService: KdbxService;
+	profileService: ProfileService;
 
 	async onload() {
 		await this.loadSettings();
 		this.vaultCryptState = {
 			profiles: [],
 			currentProfile: null,
-			isLocked: true
+			isLocked: true,
 		};
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
+		this.profileService = new ProfileService(
+			this.settings,
+			this.app.vault.adapter,
+			this.kdbxService,
+			this.vaultCryptState,
+			() => this.saveSettings(),
+		);
 
 		// Ensure the .vaultcrypt directory exists
-		await this.ensureVaultCryptDir();
+		await this.profileService.ensureVaultCryptDir();
 
 		// This creates an icon in the left ribbon.
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -106,7 +104,6 @@ export default class VaultCryptPlugin extends Plugin {
 			// eslint-disable-next-line no-console
 			console.log('VaultCrypt interval check');
 		}, 5 * 60 * 1000));
-
 	}
 
 	onunload() {
@@ -114,36 +111,50 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<VaultCryptSettings>);
+		const loaded = await this.loadData() as Partial<VaultCryptSettings> & { profiles?: unknown };
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+
+		// Migrate old profiles format (string array) to new Record<string, ProfileConfig>
+		if (Array.isArray(this.settings.profiles)) {
+			const oldPaths = this.settings.profiles as unknown as string[];
+			this.settings.profiles = {};
+			if (oldPaths.length > 0) {
+				new Notice('Profile paths from the old format were removed. Please re-add your profiles.');
+			}
+		}
+
+		// Migrate old clipboardClearTimer to clipboardClearSeconds
+		const security = this.settings.security as VaultCryptSettings['security'] & { clipboardClearTimer?: number };
+		if (security.clipboardClearTimer !== undefined && security.clipboardClearSeconds === DEFAULT_SETTINGS.security.clipboardClearSeconds) {
+			security.clipboardClearSeconds = security.clipboardClearTimer;
+		}
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
 
-	async ensureVaultCryptDir() {
-		const dirPath = this.settings.general.vaultCryptDir;
-		try {
-			await this.app.vault.adapter.mkdir(dirPath);
-			// Create config file if it doesn't exist
-			const configPath = `${dirPath}/vaultcrypt.config.json`;
-			if (!(await this.app.vault.adapter.exists(configPath))) {
-				await this.app.vault.adapter.write(configPath, JSON.stringify({
-					profiles: [],
-					security: this.settings.security,
-					general: {
-						vaultCryptDir: this.settings.general.vaultCryptDir,
-						defaultProfile: this.settings.general.defaultProfile
-					}
-				}, null, 2));
-			}
-		} catch (e) {
-			console.error('Error creating VaultCrypt directory:', e);
-			if (e instanceof Error || typeof e === 'string') {
-				new Notice(`Error creating VaultCrypt directory: ${e}`);
-			}
-		}
+	// ── Profile delegation ────────────────────────────────────────────────────
+
+	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
+		await this.profileService.addProfile(name, password, version);
 	}
+
+	async editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): Promise<void> {
+		await this.profileService.editProfile(name, updates);
+	}
+
+	async renameProfile(oldName: string, newName: string): Promise<void> {
+		await this.profileService.renameProfile(oldName, newName);
+		this.updateStatusBar();
+	}
+
+	async deleteProfile(name: string, deleteFile: boolean): Promise<void> {
+		await this.profileService.deleteProfile(name, deleteFile);
+		this.updateStatusBar();
+	}
+
+	// ── UI helpers ────────────────────────────────────────────────────────────
 
 	updateStatusBar() {
 		let statusText = '🔒 VaultCrypt';
