@@ -1,7 +1,7 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
 import VaultCryptPlugin from "./main";
-import { KdbxVersion } from "./kdbx-service";
-import { AddProfileModal, EditProfileModal, RenameProfileModal, DeleteProfileModal } from "./modals";
+import {KdbxVersion} from "./kdbx-service";
+import {AddProfileModal, EditProfileModal, RenameProfileModal, DeleteProfileModal} from "./modals";
 
 export interface ProfileConfig {
 	path: string;
@@ -20,6 +20,7 @@ export interface VaultCryptSettings {
 	general: {
 		vaultCryptDir: string;
 		defaultProfile: string;
+		compactChips: boolean;
 	};
 }
 
@@ -32,7 +33,8 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 	},
 	general: {
 		vaultCryptDir: ".vaultcrypt",
-		defaultProfile: ""
+		defaultProfile: "",
+		compactChips: false,
 	}
 }
 
@@ -133,6 +135,20 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.general.vaultCryptDir = value;
 					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Compact chips')
+			.setDesc('Show only the icon and dots in inline chips, omitting the path text')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.general.compactChips)
+				.onChange(async (value) => {
+					this.plugin.patchSettings((settings) =>{
+						settings.general.compactChips = value;
+					});
+
+					await this.plugin.saveSettings();
+
 				}));
 
 		new Setting(containerEl)

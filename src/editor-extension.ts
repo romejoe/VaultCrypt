@@ -1,47 +1,39 @@
 import {editorLivePreviewField} from 'obsidian';
 import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType} from '@codemirror/view';
-import {Extension, RangeSetBuilder} from '@codemirror/state';
-import {parseVcTokens, ParsedVcToken, resolveFieldName} from './inline-parser';
+import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
+import {parseVcTokens, ParsedVcToken} from './inline-parser';
+import {buildChipElement} from './chip-component';
 import type VaultCryptPlugin from './main';
+
+/** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
+export const refreshChipsEffect = StateEffect.define<void>();
 
 class VcTokenWidget extends WidgetType {
 	constructor(
-		private readonly label: string,
-		private readonly isValid: boolean,
+		private readonly token: ParsedVcToken,
+		private readonly plugin: VaultCryptPlugin,
 	) {
 		super();
 	}
 
 	toDOM(): HTMLElement {
-		const span = document.createElement('span');
-		span.className = this.isValid
-			? 'vaultcrypt-chip'
-			: 'vaultcrypt-chip vaultcrypt-chip-error';
-		span.textContent = this.label;
-		return span;
+		return buildChipElement(this.token, this.plugin);
 	}
 
 	eq(other: VcTokenWidget): boolean {
-		return this.label === other.label && this.isValid === other.isValid;
+		return this === other;
 	}
 
+	/** Return true so that CodeMirror doesn't steal click events for cursor placement. */
 	ignoreEvent(): boolean {
 		return true;
 	}
 }
 
-function buildLabel(token: ParsedVcToken, plugin: VaultCryptPlugin): { label: string; isValid: boolean } {
-	const profileConfig = plugin.settings.profiles[token.profileId.toLowerCase()];
-	if (!profileConfig) {
-		return {label: `⚠ unknown profile: ${token.profileId}`, isValid: false};
-	}
-	const field = resolveFieldName(token, profileConfig.defaultField);
-	return {label: `🔒 ${token.profileId}/${token.entryPath}/${field}`, isValid: true};
-}
-
 function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): DecorationSet {
 	const isLivePreview = view.state.field(editorLivePreviewField, false) ?? false;
 	const builder = new RangeSetBuilder<Decoration>();
+	const cursorPos = view.state.selection.main.head;
 
 	for (const {from, to} of view.visibleRanges) {
 		const text = view.state.doc.sliceString(from, to);
@@ -50,13 +42,14 @@ function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): Decoratio
 		for (const token of tokens) {
 			const absFrom = from + token.from;
 			const absTo = from + token.to;
+			const tokenSelected = cursorPos >= absFrom && cursorPos <= absTo;
+			if (tokenSelected) continue;
 
 			if (isLivePreview) {
-				const {label, isValid} = buildLabel(token, plugin);
 				builder.add(
 					absFrom,
 					absTo,
-					Decoration.replace({widget: new VcTokenWidget(label, isValid)}),
+					Decoration.replace({widget: new VcTokenWidget(token, plugin)}),
 				);
 			} else {
 				builder.add(
@@ -81,7 +74,10 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 			}
 
 			update(update: ViewUpdate) {
-				if (update.docChanged || update.viewportChanged || update.selectionSet) {
+				const hasRefreshEffect = update.transactions.some(tr =>
+					tr.effects.some(e => e.is(refreshChipsEffect))
+				);
+				if (update.docChanged || update.viewportChanged || update.selectionSet || hasRefreshEffect) {
 					this.decorations = buildDecorations(update.view, plugin);
 				}
 			}

@@ -81,6 +81,40 @@ export class UnlockSessionService {
 		this.scheduleAutoLock(profileId, autoLockMinutes);
 	}
 
+	/**
+	 * Reads a single field value from an open profile's database.
+	 * Returns the plaintext string, or null if the profile is locked or the
+	 * entry/field cannot be found.
+	 */
+	getFieldValue(profileId: string, entryPath: string, fieldName: string): string | null {
+		console.log('getFieldValue', profileId, entryPath, fieldName);
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+
+		const segments = entryPath.split('/');
+		const title = segments[segments.length - 1];
+		const groupSegments = segments.slice(0, -1);
+
+		// Walk the group hierarchy
+		let group = db.getDefaultGroup();
+		for (const seg of groupSegments) {
+			const child = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
+			if (!child) return null;
+			group = child;
+		}
+
+		const entry = group.entries.find(e => {
+			const t = e.fields.get('Title');
+			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
+			return text === title;
+		});
+		if (!entry) return null;
+
+		const fieldVal = entry.fields.get(fieldName);
+		if (fieldVal === undefined) return null;
+		return fieldVal instanceof kdbxweb.ProtectedValue ? fieldVal.getText() : (fieldVal ?? null);
+	}
+
 	/** Register a callback to be called when any profile is locked. */
 	onLock(cb: LockCallback): void {
 		this.lockCallbacks.push(cb);
