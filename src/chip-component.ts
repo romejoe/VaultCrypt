@@ -37,6 +37,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	});
 
 	const root = document.createElement('span');
+	root.dataset.vcChip = '';
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const errorReason = signal<string>('');
 
@@ -120,12 +121,14 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	function renderUnknown() {
 		if (!peek(profileConfig)) {
 			root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
+			root.dataset.vcCopyText = '[unknown]';
 			root.textContent = `⚠ unknown profile: ${token.profileId}`;
 		}
 	}
 
 	function renderLocked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
+		root.dataset.vcCopyText = '[locked]';
 		root.replaceChildren();
 		const label = document.createElement('span');
 		label.textContent = compact() ? '🔒 ••••••••' : `🔒 ${tooltipPath()}`;
@@ -141,6 +144,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 	function renderMasked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
+		root.dataset.vcCopyText = '[encrypted]';
 		root.replaceChildren();
 
 		const iconEl = document.createElement('span');
@@ -174,6 +178,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 	function renderMaskedError(reason: string) {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
+		root.dataset.vcCopyText = '[encrypted]';
 		root.replaceChildren();
 
 		const iconEl = document.createElement('span');
@@ -196,6 +201,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 	function renderRevealed(value: string) {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
+		root.dataset.vcCopyText = value;
 		root.replaceChildren();
 
 		const iconEl = document.createElement('span');

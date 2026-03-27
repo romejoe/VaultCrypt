@@ -3,6 +3,7 @@ import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTyp
 import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
 import {parseVcTokens, ParsedVcToken} from './inline-parser';
 import {buildChipElement, CHIP_DESTROY_EVENT} from './chip-component';
+import {buildCopyTextFromEditorSelection} from './clipboard-intercept';
 import type VaultCryptPlugin from './main';
 
 /** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
@@ -74,7 +75,7 @@ function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): Decoratio
 }
 
 export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
-	return ViewPlugin.fromClass(
+	const viewPlugin = ViewPlugin.fromClass(
 		class {
 			decorations: DecorationSet;
 
@@ -93,4 +94,17 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 		},
 		{decorations: v => v.decorations},
 	);
+
+	const copyHandler = EditorView.domEventHandlers({
+		copy(event: ClipboardEvent, view: EditorView) {
+			const copyText = buildCopyTextFromEditorSelection(view, plugin);
+			if (copyText === null) return false;
+
+			event.clipboardData?.setData('text/plain', copyText);
+			event.preventDefault();
+			return true;
+		},
+	});
+
+	return [viewPlugin, copyHandler];
 }
