@@ -1,6 +1,4 @@
-import {VaultCryptSettings} from './settings';
-
-export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:\/([a-zA-Z0-9_-]+))?\}\}/g;
+export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:#([a-zA-Z0-9_-]+))?}}/g;
 
 export interface ParsedVcToken {
 	raw: string;
@@ -32,28 +30,15 @@ export function resolveFieldName(token: ParsedVcToken, defaultField: string): st
 	return token.fieldName ?? defaultField;
 }
 
-/** Builds a chip DOM element for a parsed token. */
-function buildChip(token: ParsedVcToken, settings: VaultCryptSettings): HTMLElement {
-	const profileConfig = settings.profiles[token.profileId.toLowerCase()];
-	const span = document.createElement('span');
-
-	if (!profileConfig) {
-		span.className = 'vaultcrypt-chip vaultcrypt-chip-error';
-		span.textContent = `⚠ unknown profile: ${token.profileId}`;
-	} else {
-		const field = resolveFieldName(token, profileConfig.defaultField);
-		span.className = 'vaultcrypt-chip';
-		span.textContent = `🔒 ${token.profileId}/${token.entryPath}/${field}`;
-	}
-
-	return span;
-}
-
 /**
  * Walks all text nodes in `el`, finds `{{vc:...}}` tokens, and replaces each
- * with an inline chip span. The underlying markdown is never modified.
+ * with an inline chip span produced by `buildChip`. The underlying markdown is
+ * never modified.
  */
-export function processVcTokensInDom(el: HTMLElement, settings: VaultCryptSettings): void {
+export function processVcTokensInDom(
+	el: HTMLElement,
+	buildChip: (token: ParsedVcToken) => HTMLElement,
+): void {
 	const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 	const textNodes: Text[] = [];
 	let node: Node | null;
@@ -76,7 +61,7 @@ export function processVcTokensInDom(el: HTMLElement, settings: VaultCryptSettin
 			if (token.from > cursor) {
 				fragment.appendChild(document.createTextNode(text.slice(cursor, token.from)));
 			}
-			fragment.appendChild(buildChip(token, settings));
+			fragment.appendChild(buildChip(token));
 			cursor = token.to;
 		}
 

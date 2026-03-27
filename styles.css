@@ -19,6 +19,8 @@ If your plugin does not need CSS, delete this file.
 	padding: 0 2px;
 }
 
+/* ── Chip base ──────────────────────────────────────────────────────────────── */
+
 /* Live preview / reading mode: inline chip replacing the token */
 .vaultcrypt-chip {
 	display: inline-flex;
@@ -30,13 +32,87 @@ If your plugin does not need CSS, delete this file.
 	background: rgba(var(--color-accent-rgb), 0.15);
 	color: var(--text-muted);
 	font-family: var(--font-monospace);
-	cursor: default;
 	user-select: none;
 	white-space: nowrap;
+	vertical-align: middle;
 }
 
 /* Error chip for unknown/invalid profile references */
 .vaultcrypt-chip-error {
 	background: rgba(var(--color-red-rgb), 0.15);
 	color: var(--text-error);
+}
+
+/* ── Chip states ────────────────────────────────────────────────────────────── */
+
+/* Locked: profile is not unlocked — click to open unlock modal */
+.vaultcrypt-chip-locked {
+	cursor: pointer;
+	opacity: 0.65;
+}
+
+.vaultcrypt-chip-locked:hover {
+	opacity: 1;
+	background: rgba(var(--color-accent-rgb), 0.25);
+}
+
+/* Masked: profile unlocked but value is hidden */
+.vaultcrypt-chip-masked {
+	cursor: default;
+}
+
+/* Revealed: plaintext value is shown */
+.vaultcrypt-chip-revealed {
+	background: rgba(var(--color-green-rgb), 0.15);
+	color: var(--text-normal);
+}
+
+/* ── Chip internals ─────────────────────────────────────────────────────────── */
+
+/* Dots placeholder shown in masked state */
+.vaultcrypt-chip-dots {
+	letter-spacing: 2px;
+}
+
+
+
+/* Action buttons (copy, edit) inside a chip */
+.vaultcrypt-chip-btn {
+	background: none;
+	border: none;
+	padding: 0 1px;
+	margin: 0;
+	cursor: pointer;
+	font-size: inherit;
+	color: inherit;
+	line-height: 1;
+	opacity: 0.7;
+	transition: opacity 0.1s;
+}
+
+.vaultcrypt-chip-btn:hover {
+	opacity: 1;
+	color: var(--text-accent);
+}
+
+.vaultcrypt-chip-icon-unlocked{
+	cursor: pointer;
+}
+
+.vaultcrypt-chip-icon-locked{
+	cursor: pointer;
+}
+
+.vaultcrypt-chip-icon-unlocked{
+	cursor: pointer;
+}
+
+.vaultcrypt-chip-dots{
+	cursor: pointer;
+}
+
+/* Revealed plaintext value */
+.vaultcrypt-chip-value{
+	cursor: text;
+	user-select: text;
 }

@@ -1,40 +1,90 @@
-import {Menu, Notice, Plugin, TFile} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Plugin, TFile} from 'obsidian';
 import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {UnlockModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
-import {buildEditorExtension} from './editor-extension';
+import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {processVcTokensInDom} from './inline-parser';
+import {buildChipElement} from './chip-component';
+import {EditorView} from '@codemirror/view';
+import {Extension} from "@codemirror/state";
+import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
+import {deepFreeze, DeepReadonly} from "./utils";
 
 export type {VaultCryptProfile, VaultCryptState};
 
+declare module 'obsidian' {
+	interface View {
+		// Expose the EditorView on the Obsidian MarkdownView for our editor extension to consume.
+		editor?: Editor & {
+			cm?: EditorView;
+		}
+	}
+}
+
+const DEFAULT_STATE: VaultCryptState = {
+	profiles: [],
+	currentProfile: null,
+	isLocked: true,
+}
+
 export default class VaultCryptPlugin extends Plugin {
-	settings: VaultCryptSettings;
-	statusBarItem: HTMLElement;
-	vaultCryptState: VaultCryptState;
-	kdbxService: KdbxService;
-	profileService: ProfileService;
-	sessionService: UnlockSessionService;
+
+	private readonly _settings$ = signal<VaultCryptSettings>(DEFAULT_SETTINGS);
+	readonly settings$ = computed(() => {
+		return deepFreeze(structuredClone(this._settings$()));
+	});
+	private clearClipboardTimeouts: number[] = [];
+	private effects: StopEffect[] = [];
+
+
+	get settings(): DeepReadonly<VaultCryptSettings> {
+		return peek(this.settings$);
+	}
+
+	statusBarItem?: HTMLElement;
+	private readonly _vaultCryptState$ = signal<VaultCryptState>(DEFAULT_STATE);
+	readonly vaultCryptState$ = computed(() => {
+		return deepFreeze(structuredClone(this._vaultCryptState$()));
+	});
+
+	/*
+	 * vaultCryptState is the runtime state of the plugin, derived from persisted settings but enriched with volatile properties like isLocked and lastUnlock that aren't stored on disk.
+	 * @deprecated Use vaultCryptState$ instead.
+	 */
+	get vaultCryptState(): DeepReadonly<VaultCryptState> {
+		return peek(this.vaultCryptState$);
+	}
+
+	kdbxService?: KdbxService;
+	profileService!: ProfileService;
+	sessionService!: UnlockSessionService;
+	private editorExtension?: Extension;
 
 	async onload() {
 		await this.loadSettings();
-		this.vaultCryptState = {
+		this._vaultCryptState$.set({
 			profiles: [],
 			currentProfile: null,
 			isLocked: true,
-		};
+		});
 		// KdbxService must be instantiated first — its constructor registers the
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
 		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
 		this.profileService = new ProfileService(
-			this.settings,
+			this.settings$,
 			this.app.vault.adapter,
 			this.kdbxService,
-			this.vaultCryptState,
-			() => this.saveSettings(),
+			this.vaultCryptState$,
+			(patcher) => {
+				this.patchSettings(patcher);
+			},
+			(mutator) => {
+				this.mutateState(mutator);
+			}
 		);
 
 		// Populate runtime state from persisted settings
@@ -46,12 +96,22 @@ export default class VaultCryptPlugin extends Plugin {
 		// Wire session events → sync runtime state + update UI
 		this.sessionService.onUnlock(id => {
 			this.syncProfileLockState(id, false);
-			this.updateStatusBar();
+			this.refreshAllEditorChips();
 		});
 		this.sessionService.onLock(id => {
 			this.syncProfileLockState(id, true);
-			this.updateStatusBar();
 			new Notice(`Profile "${id}" is locked`);
+			this.refreshAllEditorChips();
+
+			// This is very heavy-handed, is probably fragile and bad practice, but it works for now.
+			document.querySelectorAll('.vaultcrypt-chip').forEach(el => {
+				el.dispatchEvent(new CustomEvent('vc-token-event', {
+					detail: {
+						type: 'profile-lock',
+						profileId: id,
+					}
+				}));
+			});
 		});
 
 		// Ribbon icon → unlock modal
@@ -62,13 +122,13 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Status bar
 		this.statusBarItem = this.addStatusBarItem();
-		this.updateStatusBar();
 
 		// Status bar click → lock menu
 		this.registerDomEvent(this.statusBarItem, 'click', (evt: MouseEvent) => {
 			const menu = new Menu();
-			const unlocked = this.vaultCryptState.profiles.filter(p => !p.isLocked);
-			const locked = this.vaultCryptState.profiles.filter(p => p.isLocked);
+			const state = peek(this.vaultCryptState$);
+			const unlocked = state.profiles.filter(p => !p.isLocked);
+			const locked = state.profiles.filter(p => p.isLocked);
 
 			for (const p of locked) {
 				menu.addItem(item => item
@@ -160,13 +220,26 @@ export default class VaultCryptPlugin extends Plugin {
 			if (!file || file.extension !== 'md') return;
 			const content = await this.app.vault.read(file);
 			const matches = [...content.matchAll(/\{\{vc:([^:}]+)/g)];
+
+			const settings = peek(this.settings$);
 			const lockedProfileIds = new Set(
 				matches
-					.map(m => (m[1] ?? '').toLowerCase())
-					.filter(id => this.settings.profiles[id] && !this.sessionService.isUnlocked(id))
+					.map(m => {
+						const identifierString = (m[1] ?? '').toLowerCase();
+						if (identifierString === '') return null;
+						const profileIdEndIndex = identifierString.indexOf("/");
+
+						const profileId = profileIdEndIndex < 0 ? '' : identifierString.substring(0, profileIdEndIndex);
+						if (profileId in settings.profiles) {
+							return profileId;
+						}
+						return null;
+					})
+					.filter((profileId): profileId is string => !!profileId)
+					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
 			for (const profileId of lockedProfileIds) {
-				const notice = new Notice(`Profile "${profileId}" is locked. `, 0);
+				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
 				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
 				btn.addEventListener('click', () => {
 					notice.hide();
@@ -180,47 +253,89 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Reading mode post-processor
 		this.registerMarkdownPostProcessor((el) => {
-			processVcTokensInDom(el, this.settings);
+			processVcTokensInDom(el, (token) => buildChipElement(token, this));
 		});
 
 		// Settings tab
 		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
+
+		this.effects = [
+			effect(() => {
+				const settings = this._settings$();
+				this.refreshAllEditorChips();
+				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
+				this.dispatchSaveSettings();
+			}),
+			effect(() => {
+				const profiles = this.vaultCryptState$().profiles;
+				if (!this.statusBarItem) {
+					return;
+				}
+				if (profiles.length === 0) {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					this.statusBarItem.setText('🔒 VaultCrypt');
+					return;
+				}
+				const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
+				this.statusBarItem.setText(parts.join(' | '));
+			})
+		]
+
 	}
 
 	onunload() {
-		this.sessionService.lockAll();
+		for (const effect of this.effects) {
+			effect?.();
+		}
+		for (const timeoutId of this.clearClipboardTimeouts) {
+			window.clearTimeout(timeoutId);
+		}
+		this.sessionService?.lockAll();
 	}
 
 	async loadSettings() {
-		const loaded = await this.loadData() as Partial<VaultCryptSettings> & { profiles?: unknown };
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		const loaded = await this.loadData() as Partial<VaultCryptSettings> | null;
+		const newSettings: VaultCryptSettings = {
+			...structuredClone(DEFAULT_SETTINGS),
+			...loaded,
+			general: {
+				...DEFAULT_SETTINGS.general,
+				...(loaded?.general ?? {}),
+			},
+			security: {
+				...DEFAULT_SETTINGS.security,
+				...(loaded?.security ?? {}),
+			},
+			profiles: (loaded?.profiles ?? structuredClone(DEFAULT_SETTINGS.profiles)),
+		};
 
 		// Migrate old profiles format (string array) to new Record<string, ProfileConfig>
-		if (Array.isArray(this.settings.profiles)) {
-			const oldPaths = this.settings.profiles as unknown as string[];
-			this.settings.profiles = {};
+		if (Array.isArray(newSettings.profiles)) {
+			const oldPaths = newSettings.profiles as unknown as string[];
+			newSettings.profiles = {};
 			if (oldPaths.length > 0) {
 				new Notice('Profile paths from the old format were removed. Please re-add your profiles.');
 			}
 		}
 
 		// Migrate old clipboardClearTimer to clipboardClearSeconds
-		const security = this.settings.security as VaultCryptSettings['security'] & { clipboardClearTimer?: number };
+		const security = newSettings.security as VaultCryptSettings['security'] & { clipboardClearTimer?: number };
 		if (security.clipboardClearTimer !== undefined && security.clipboardClearSeconds === DEFAULT_SETTINGS.security.clipboardClearSeconds) {
 			security.clipboardClearSeconds = security.clipboardClearTimer;
 		}
+
+		this._settings$.set(newSettings);
 	}
 
-	async saveSettings() {
+	private async saveSettings() {
 		await this.saveData(this.settings);
 	}
 
 	// ── Profile delegation ────────────────────────────────────────────────────
 
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
-		await this.profileService.addProfile(name, password, version);
+		await this.profileService?.addProfile(name, password, version);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	async editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): Promise<void> {
@@ -230,7 +345,6 @@ export default class VaultCryptPlugin extends Plugin {
 	async renameProfile(oldName: string, newName: string): Promise<void> {
 		await this.profileService.renameProfile(oldName, newName);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	async deleteProfile(name: string, deleteFile: boolean): Promise<void> {
@@ -239,7 +353,6 @@ export default class VaultCryptPlugin extends Plugin {
 		this.sessionService.lockProfile(key);
 		await this.profileService.deleteProfile(name, deleteFile);
 		this.initRuntimeState();
-		this.updateStatusBar();
 	}
 
 	// ── Runtime state ─────────────────────────────────────────────────────────
@@ -249,35 +362,41 @@ export default class VaultCryptPlugin extends Plugin {
 	 * the current lock/unlock state of profiles that are already open.
 	 */
 	private initRuntimeState(): void {
-		this.vaultCryptState.profiles = Object.entries(this.settings.profiles).map(([id, cfg]) => {
-			const existing = this.vaultCryptState.profiles.find(p => p.id === id);
-			return {
-				id,
-				name: id,
-				path: cfg.path,
-				kdbxVersion: cfg.kdbxVersion,
-				autoLockMinutes: cfg.autoLockMinutes,
-				isLocked: existing ? existing.isLocked : !this.sessionService.isUnlocked(id),
-				lastUnlock: existing?.lastUnlock ?? null,
-			};
-		});
-		// currentProfile: keep if still present, otherwise null
-		if (this.vaultCryptState.currentProfile) {
-			const still = this.vaultCryptState.profiles.find(
-				p => p.id === this.vaultCryptState.currentProfile!.id
-			);
-			this.vaultCryptState.currentProfile = still ?? null;
-		}
+		this.mutateState(state => {
+			state.profiles = Object.entries(this.settings.profiles).map(([id, cfg]) => {
+				const existing = state.profiles.find(p => p.id === id);
+				return {
+					id,
+					name: id,
+					path: cfg.path,
+					kdbxVersion: cfg.kdbxVersion,
+					autoLockMinutes: cfg.autoLockMinutes,
+					isLocked: existing ? existing.isLocked : !this.sessionService.isUnlocked(id),
+					lastUnlock: existing?.lastUnlock ?? null,
+				};
+			});
+			state.isLocked = state.profiles.every(p => p.isLocked);
+			// currentProfile: keep if still present, otherwise null
+			if (state.currentProfile) {
+				const still = state.profiles.find(
+					p => p.id === state.currentProfile!.id
+				);
+				state.currentProfile = still ?? null;
+			}
+		})
+
 	}
 
 	/** Updates the isLocked flag and lastUnlock date for a profile in runtime state. */
 	private syncProfileLockState(profileId: string, isLocked: boolean): void {
-		const profile = this.vaultCryptState.profiles.find(p => p.id === profileId);
-		if (!profile) return;
-		profile.isLocked = isLocked;
-		if (!isLocked) profile.lastUnlock = new Date();
-		// Keep the top-level isLocked in sync (true only when all profiles are locked)
-		this.vaultCryptState.isLocked = this.vaultCryptState.profiles.every(p => p.isLocked);
+		this.mutateState(state => {
+			const profile = state.profiles.find(p => p.id === profileId);
+			if (!profile) return;
+			profile.isLocked = isLocked;
+			if (!isLocked) profile.lastUnlock = new Date();
+			// Keep the top-level isLocked in sync (true only when all profiles are locked)
+			state.isLocked = state.profiles.every(p => p.isLocked);
+		});
 	}
 
 	/**
@@ -294,14 +413,65 @@ export default class VaultCryptPlugin extends Plugin {
 
 	// ── UI helpers ────────────────────────────────────────────────────────────
 
-	updateStatusBar() {
-		const profiles = this.vaultCryptState.profiles;
-		if (profiles.length === 0) {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			this.statusBarItem.setText('🔒 VaultCrypt');
-			return;
-		}
-		const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
-		this.statusBarItem.setText(parts.join(' | '));
+	/**
+	 * Dispatches `refreshChipsEffect` to all open CodeMirror editor views so
+	 * that chip decorations are rebuilt immediately after a lock/unlock event.
+	 */
+	private refreshAllEditorChips(): void {
+		this.app.workspace.iterateAllLeaves(leaf => {
+			// Obsidian wraps the CodeMirror EditorView as editor.cm (semi-private)
+			const cm: EditorView | undefined = leaf.view?.editor?.cm;
+			if (!cm) {
+				console.debug('[VaultCrypt] No CodeMirror editor found in leaf:', leaf);
+				return;
+			}
+			cm.dispatch({effects: refreshChipsEffect.of(undefined)});
+		});
+	}
+
+	patchSettings(patcher: (settings: VaultCryptSettings) => void) {
+		const newSettings = structuredClone(peek(this._settings$));
+		patcher(newSettings);
+
+		this._settings$.set(newSettings);
+	}
+
+	private dispatchSaveSettings() {
+		this.saveSettings().then(() => {
+			console.debug('[VaultCrypt] Settings saved successfully');
+		}, (err) => {
+			console.error('Error saving settings:', err);
+			new Notice('Error saving settings. Please check the console for details.');
+		});
+	}
+
+	scheduleClearClipboardTime(value: string, secs: number | undefined) {
+		if (secs === undefined || secs <= 0) return;
+		const timeoutId = window.setTimeout(() => {
+			navigator.clipboard.readText().then(current => {
+				if (current === value) {
+					navigator.clipboard.writeText('').then(() => {
+						console.debug('[VaultCrypt] Clipboard cleared');
+					}, () => {
+						new Notice('Failed to clear clipboard');
+						console.debug('[VaultCrypt] Failed to clear clipboard');
+
+					});
+				}
+			}).catch(() => {
+				// readText may be denied; best-effort clear
+				new Notice('Skipping clipboard clear because current contents could not be verified');
+			});
+			this.clearClipboardTimeouts = this.clearClipboardTimeouts.filter(id => id !== timeoutId);
+
+		}, secs * 1000)
+		this.clearClipboardTimeouts.push(timeoutId);
+
+	}
+
+	private mutateState(mutator: (state: VaultCryptState) => void) {
+		const newState = structuredClone(peek(this._vaultCryptState$));
+		mutator(newState);
+		this._vaultCryptState$.set(newState);
 	}
 }
