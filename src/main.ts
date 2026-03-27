@@ -6,7 +6,7 @@ import {UnlockSessionService} from './unlock-session';
 import {UnlockModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
-import {processVcTokensInDom} from './inline-parser';
+import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
@@ -203,6 +203,36 @@ export default class VaultCryptPlugin extends Plugin {
 			name: 'Lock all profiles',
 			callback: () => {
 				this.sessionService.lockAll();
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-copy-focused-chip',
+			name: 'Copy secret under cursor',
+			editorCallback: (editor: Editor) => {
+				const cursor = editor.getCursor();
+				const lineText = editor.getLine(cursor.line);
+				const tokens = parseVcTokens(lineText);
+				const token = tokens.find(t => cursor.ch >= t.from && cursor.ch <= t.to);
+				if (!token) {
+					new Notice('No secret token under cursor');
+					return;
+				}
+				const profileId = token.profileId.toLowerCase();
+				const config = this.settings.profiles[profileId];
+				const fieldName = resolveFieldName(token, config?.defaultField ?? 'Password');
+				const value = this.sessionService?.getFieldValue(profileId, token.entryPath, fieldName);
+				if (value === null || value === undefined) {
+					new Notice('Could not read value — is the profile unlocked?');
+					return;
+				}
+				navigator.clipboard.writeText(value).then(() => {
+					new Notice('Copied to clipboard', 3000);
+					const secs = this.settings.security.clipboardClearSeconds;
+					if (secs !== undefined && secs > 0) {
+						this.scheduleClearClipboardTime(value, secs);
+					}
+				}).catch(() => new Notice('Failed to copy to clipboard'));
 			}
 		});
 

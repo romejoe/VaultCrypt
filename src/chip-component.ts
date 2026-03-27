@@ -99,7 +99,6 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			} else if (currentState === 'revealed') {
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
-					new Notice('Could not read value — is the profile still unlocked?');
 					chipState.set('masked');
 					renderMasked();
 				} else {
@@ -221,19 +220,41 @@ function copyField(
 	fieldName: string,
 	plugin: VaultCryptPlugin,
 ): void {
-	const value = plugin.sessionService?.getFieldValue(profileId, entryPath, fieldName);
-	if (value === null || value === undefined) {
+	const rawValue = plugin.sessionService?.getFieldValue(profileId, entryPath, fieldName);
+	if (rawValue === null || rawValue === undefined) {
 		new Notice('Could not read value — is the profile still unlocked?');
 		return;
 	}
+	const value: string = rawValue;
 
-	navigator.clipboard.writeText(value).then(() => {
+	function onCopySuccess() {
+		new Notice('Copied to clipboard', 3000);
 		const secs = plugin.settings.security.clipboardClearSeconds;
-		if (secs === undefined || secs <= 0) return;
+		if (secs !== undefined && secs > 0) {
+			plugin.scheduleClearClipboardTime(value, secs);
+		}
+	}
 
-		new Notice(`Copied! Clipboard will clear in ${secs}s`);
-		plugin.scheduleClearClipboardTime(value, secs);
-	}).catch(() => {
-		new Notice('Failed to copy to clipboard');
+	navigator.clipboard.writeText(value).then(onCopySuccess).catch(() => {
+		// Fallback for mobile WebViews where the Clipboard API may be unavailable
+		try {
+			const textarea = document.createElement('textarea');
+			textarea.value = value;
+			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+			textarea.style.cssText = 'position:fixed;opacity:0;';
+			document.body.appendChild(textarea);
+			textarea.focus();
+			textarea.select();
+			// eslint-disable-next-line @typescript-eslint/no-deprecated
+			const ok = document.execCommand('copy');
+			document.body.removeChild(textarea);
+			if (ok) {
+				onCopySuccess();
+			} else {
+				new Notice('Failed to copy to clipboard');
+			}
+		} catch {
+			new Notice('Failed to copy to clipboard');
+		}
 	});
 }
