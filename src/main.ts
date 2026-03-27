@@ -363,10 +363,10 @@ export default class VaultCryptPlugin extends Plugin {
 
 		this.effects = [
 			effect(() => {
-				this._settings$();
+				const settings = this.settings$();
 				this.refreshAllEditorChips();
 				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
-				this.dispatchSaveSettings();
+				this.dispatchSaveSettings(settings);
 			}),
 			effect(() => {
 				const profiles = this.vaultCryptState$().profiles;
@@ -441,8 +441,8 @@ export default class VaultCryptPlugin extends Plugin {
 		this._settings$.set(newSettings);
 	}
 
-	private async saveSettings() {
-		await this.saveData(this.settings);
+	private async saveSettings(settings: DeepReadonly<VaultCryptSettings>) {
+		await this.saveData(settings);
 	}
 
 	// ── Profile delegation ────────────────────────────────────────────────────
@@ -557,8 +557,8 @@ export default class VaultCryptPlugin extends Plugin {
 		this._settings$.set(newSettings);
 	}
 
-	private dispatchSaveSettings() {
-		this.saveSettings().then(() => {
+	private dispatchSaveSettings(settings: DeepReadonly<VaultCryptSettings>) {
+		this.saveSettings(settings).then(() => {
 			console.debug('[VaultCrypt] Settings saved successfully');
 		}, (err) => {
 			console.error('Error saving settings:', err);
@@ -596,7 +596,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.clearClipboardTimeouts.push(timeoutId);
 	}
 
-	private mutateState(mutator: (state: VaultCryptState) => void) {
+	public mutateState(mutator: (state: VaultCryptState) => void) {
 		const newState = structuredClone(peek(this._vaultCryptState$));
 		mutator(newState);
 		this._vaultCryptState$.set(newState);

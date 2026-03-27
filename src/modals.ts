@@ -1,5 +1,5 @@
 import {App, ButtonComponent, Modal, Notice, Setting} from "obsidian";
-import VaultCryptPlugin from "./main";
+import VaultCryptPlugin, {VaultCryptState} from "./main";
 import {ProfileConfig, validateProfileName, VaultCryptSettings} from "./settings";
 import {KdbxVersion} from "./kdbx-service";
 import {peek} from "@maverick-js/signals";
@@ -918,6 +918,13 @@ export class AddToKeyringModal extends Modal {
 			// Mark as managed
 			this.plugin.patchSettings((s: VaultCryptSettings) => {
 				const profile = s.profiles[this.selectedProfileId];
+				console.log("Settings: Adding profile to keyring", profile);
+				if (profile) profile.managedByKeyring = true;
+			});
+
+			this.plugin.mutateState((s: VaultCryptState) => {
+				const profile = s.profiles.find(profile => profile.id === this.selectedProfileId);
+				console.log("State: Adding profile to keyring", profile);
 				if (profile) profile.managedByKeyring = true;
 			});
 
@@ -925,7 +932,7 @@ export class AddToKeyringModal extends Modal {
 			this.close();
 			this.onDone();
 		} catch (e) {
-			this.showError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+			this.showError(e instanceof Error ? e.message : `Error: ${String(e)}`);
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
@@ -1003,13 +1010,21 @@ export class RemoveFromKeyringModal extends Modal {
 			);
 			this.plugin.patchSettings((s: VaultCryptSettings) => {
 				const profile = s.profiles[this.profileId];
+				console.log("Settings: Removing profile from keyring", profile);
 				if (profile) profile.managedByKeyring = false;
 			});
+
+			this.plugin.mutateState((s: VaultCryptState) => {
+				const profile = s.profiles.find(profile => profile.id === this.profileId);
+				console.log("State: Removing profile from keyring", profile);
+				if (profile) profile.managedByKeyring = false;
+			})
+
 			new Notice(`Profile "${this.profileId}" removed from keyring.`);
 			this.close();
 			this.onDone();
 		} catch (e) {
-			this.showError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+			this.showError(e instanceof Error ? e.message : `Error: ${String(e)}`);
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
@@ -1103,7 +1118,7 @@ export class ChangeKeyringPasswordModal extends Modal {
 			this.close();
 			this.onDone();
 		} catch (e) {
-			this.showError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+			this.showError(e instanceof Error ? e.message : `Error: ${String(e)}`);
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
@@ -1192,11 +1207,15 @@ export class DeleteKeyringModal extends Modal {
 				}
 			});
 
+			this.plugin.mutateState((s: VaultCryptState) => {
+				s.profiles.forEach(profile => profile.managedByKeyring = false);
+			})
+
 			new Notice("Keyring deleted.");
 			this.close();
 			this.onDone();
 		} catch (e) {
-			this.showError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+			this.showError(e instanceof Error ? e.message : `Error: ${String(e)}`);
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
