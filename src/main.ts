@@ -31,7 +31,6 @@ const DEFAULT_STATE: VaultCryptState = {
 }
 
 export default class VaultCryptPlugin extends Plugin {
-	private settingsChangeStopEffect?: StopEffect;
 
 	private readonly _settings$ = signal<VaultCryptSettings>(DEFAULT_SETTINGS);
 	readonly settings$ = computed(() => {
@@ -114,8 +113,6 @@ export default class VaultCryptPlugin extends Plugin {
 				}));
 			});
 		});
-
-		// this.settingsChangeStopEffect = ;
 
 		// Ribbon icon → unlock modal
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -287,7 +284,6 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.settingsChangeStopEffect?.();
 		for (const effect of this.effects) {
 			effect?.();
 		}

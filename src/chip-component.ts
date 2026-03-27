@@ -2,7 +2,9 @@ import {Notice} from 'obsidian';
 import {UnlockModal} from './modals';
 import {ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
-import {computed, effect, peek, signal} from "@maverick-js/signals";
+import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
+
+export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
 /**
  * Builds an interactive inline chip element for a parsed {{vc:...}} token.
@@ -19,7 +21,7 @@ import {computed, effect, peek, signal} from "@maverick-js/signals";
  */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
-
+	let effects: StopEffect[] = [];
 	const profileConfig = computed(() => {
 		return plugin.settings$().profiles[profileId];
 	});
@@ -45,60 +47,72 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		return `${profileId}/${token.entryPath}#${field()}`;
 	})
 
-
-	effect(() => {
-		root.title = tooltipPath();
-	});
-
-
-	effect(() => {
-		const currentState = chipState();
-		const pluginState = plugin.vaultCryptState$();
-
-		const profileLocked = pluginState.profiles.find(profile => {
-			return profile.id === profileId;
-		})?.isLocked ?? true;
-
-		if (profileLocked) {
-			chipState.set('locked');
-			return;
+	root.addEventListener(CHIP_DESTROY_EVENT, (evt) => {
+		for (const effect of effects) {
+			effect?.();
 		}
-
-		if (currentState === 'unknown' || currentState === 'revealed') {
-			return;
-		}
-
-		if (currentState === 'locked') {
-			chipState.set(peek(autoUnmask) ? 'revealed' : 'masked');
-		}
-	});
+	})
 
 
-	effect(() => {
-		const currentState = chipState();
+	effects = [
+		effect(() => {
+			root.title = tooltipPath();
+		}),
 
-		if (currentState === 'unknown') {
-			renderUnknown();
-		}
-		if (currentState === 'locked') {
-			renderLocked();
-		} else if (currentState === 'masked') {
-			renderMasked();
-		} else if (currentState === 'revealed') {
-			const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
-			if (value === null || value === undefined) {
-				new Notice('Could not read value — is the profile still unlocked?');
-				chipState.set('masked');
-			} else {
-				renderRevealed(value);
+		effect(() => {
+			const currentState = chipState();
+			const pluginState = plugin.vaultCryptState$();
+			const config = profileConfig();
+
+			if(!config) {
+				chipState.set('unknown');
+				return;
 			}
-		}
-	});
+
+			const profileLocked = pluginState.profiles.find(profile => {
+				return profile.id === profileId;
+			})?.isLocked ?? true;
+
+			if (profileLocked) {
+				chipState.set('locked');
+				return;
+			}
+
+			if (currentState === 'unknown' || currentState === 'revealed') {
+				return;
+			}
+
+			if (currentState === 'locked') {
+				chipState.set(peek(autoUnmask) ? 'revealed' : 'masked');
+			}
+		}),
+
+		effect(() => {
+			const currentState = chipState();
+			if (currentState === 'unknown') {
+				renderUnknown();
+			}
+			if (currentState === 'locked') {
+				renderLocked();
+			} else if (currentState === 'masked') {
+				renderMasked();
+			} else if (currentState === 'revealed') {
+				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
+				if (value === null || value === undefined) {
+					new Notice('Could not read value — is the profile still unlocked?');
+					chipState.set('masked');
+					renderMasked();
+				} else {
+					renderRevealed(value);
+				}
+			}
+		})
+	];
 
 	// ── Inner render functions — each clears root's children then repopulates ──
 
 	function renderUnknown() {
-		if (!profileConfig) {
+		if (!peek(profileConfig)) {
 			root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
 			root.textContent = `⚠ unknown profile: ${token.profileId}`;
 		}
@@ -184,7 +198,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		root.appendChild(iconEl);
 		root.appendChild(valueEl);
-		if (!compact) root.appendChild(editBtn);
+		if (!compact()) root.appendChild(editBtn);
 		root.appendChild(copyBtn);
 	}
 

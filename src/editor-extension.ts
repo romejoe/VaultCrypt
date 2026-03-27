@@ -2,7 +2,7 @@ import {editorLivePreviewField} from 'obsidian';
 import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType} from '@codemirror/view';
 import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
 import {parseVcTokens, ParsedVcToken} from './inline-parser';
-import {buildChipElement} from './chip-component';
+import {buildChipElement, CHIP_DESTROY_EVENT} from './chip-component';
 import type VaultCryptPlugin from './main';
 
 /** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
@@ -31,6 +31,11 @@ class VcTokenWidget extends WidgetType {
 	/** Return true so that CodeMirror doesn't steal click events for cursor placement. */
 	ignoreEvent(): boolean {
 		return true;
+	}
+
+	destroy(dom: HTMLElement): void {
+		const event = new CustomEvent(CHIP_DESTROY_EVENT);
+		dom.dispatchEvent(event);
 	}
 }
 
