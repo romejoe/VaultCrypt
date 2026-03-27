@@ -18,6 +18,8 @@ export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
  *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
  *   profile unlocked →  masked chip (copy) ⟷ revealed chip (show value, edit stub, copy)
+ *                        ↓ on getFieldValue null
+ *                       masked-error chip (verbose reason, retry button)
  */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
@@ -35,7 +37,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	});
 
 	const root = document.createElement('span');
-	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown'>('locked');
+	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
+	const errorReason = signal<string>('');
 
 
 	const field = computed(() => {
@@ -78,7 +81,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				return;
 			}
 
-			if (currentState === 'unknown' || currentState === 'revealed') {
+			if (currentState === 'unknown' || currentState === 'revealed' || currentState === 'masked-error') {
 				return;
 			}
 
@@ -99,12 +102,15 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			} else if (currentState === 'revealed') {
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
-					new Notice('Could not read value — is the profile still unlocked?');
-					chipState.set('masked');
-					renderMasked();
+					errorReason.set(`Entry or field not found: ${peek(tooltipPath)}`);
+					chipState.set('masked-error');
+					renderMaskedError(peek(errorReason));
+
 				} else {
 					renderRevealed(value);
 				}
+			} else if (currentState === 'masked-error') {
+				renderMaskedError(peek(errorReason));
 			}
 		})
 	];
@@ -166,6 +172,28 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		root.appendChild(copyBtn);
 	}
 
+	function renderMaskedError(reason: string) {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.textContent = '⚠';
+		iconEl.className = 'vaultcrypt-chip-icon';
+
+		const labelEl = document.createElement('span');
+		labelEl.textContent = reason;
+
+		const retryBtn = makeButton('🔄', 'Retry');
+		retryBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			chipState.set('masked');
+		});
+
+		root.appendChild(iconEl);
+		root.appendChild(labelEl);
+		root.appendChild(retryBtn);
+	}
+
 	function renderRevealed(value: string) {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
 		root.replaceChildren();
@@ -221,19 +249,45 @@ function copyField(
 	fieldName: string,
 	plugin: VaultCryptPlugin,
 ): void {
-	const value = plugin.sessionService?.getFieldValue(profileId, entryPath, fieldName);
-	if (value === null || value === undefined) {
+	const rawValue = plugin.sessionService?.getFieldValue(profileId, entryPath, fieldName);
+	if (rawValue === null || rawValue === undefined) {
 		new Notice('Could not read value — is the profile still unlocked?');
 		return;
 	}
+	const value: string = rawValue;
 
-	navigator.clipboard.writeText(value).then(() => {
+	function onCopySuccess() {
+		new Notice('Copied to clipboard', 3000);
 		const secs = plugin.settings.security.clipboardClearSeconds;
-		if (secs === undefined || secs <= 0) return;
+		if (secs !== undefined && secs > 0) {
+			plugin.scheduleClearClipboardTime(value, secs);
+		}
+	}
 
-		new Notice(`Copied! Clipboard will clear in ${secs}s`);
-		plugin.scheduleClearClipboardTime(value, secs);
-	}).catch(() => {
-		new Notice('Failed to copy to clipboard');
+	navigator.clipboard.writeText(value).then(onCopySuccess).catch(() => {
+		// Fallback for mobile WebViews where the Clipboard API may be unavailable
+		let textarea: HTMLTextAreaElement|null = null;
+		try {
+			textarea = document.createElement('textarea');
+			textarea.value = value;
+			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+			textarea.style.cssText = 'position:fixed;opacity:0;';
+			document.body.appendChild(textarea);
+			textarea.focus();
+			textarea.select();
+			// eslint-disable-next-line @typescript-eslint/no-deprecated
+			const ok = document.execCommand('copy');
+			document.body.removeChild(textarea);
+			if (ok) {
+				onCopySuccess();
+			} else {
+				new Notice('Failed to copy to clipboard');
+			}
+		} catch {
+			if(textarea !== null){
+				textarea.remove();
+			}
+			new Notice('Failed to copy to clipboard');
+		}
 	});
 }
