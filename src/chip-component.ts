@@ -359,8 +359,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			if (evt.key === 'Enter') {
 				evt.preventDefault();
 				saving = true;
-				void saveEdit(input.value).then(() => {
-					editState.set(null);
+				void saveEdit(input.value).then((saved) => {
+					if (saved) editState.set(null);
 				});
 			} else if (evt.key === 'Escape') {
 				evt.preventDefault();
@@ -368,13 +368,15 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			}
 		});
 
-		input.addEventListener('blur', () => {
+		input.addEventListener('blur', (evt) => {
 			if (saving) return;
 			// If editState was already cleared (e.g. by Escape) or changed (mode switch), skip
 			if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
+			// If focus moved to another element inside the chip (e.g. Tab to expand button), keep editing
+			if (evt.relatedTarget instanceof Node && root.contains(evt.relatedTarget)) return;
 			if (peek(saveOnBlur)) {
-				void saveEdit(input.value).then(() => {
-					editState.set(null);
+				void saveEdit(input.value).then((saved) => {
+					if (saved) editState.set(null);
 				});
 			} else {
 				editState.set(null);
@@ -443,8 +445,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		saveBtn.className = 'mod-cta';
 		saveBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			void saveEdit(textarea.value).then(() => {
-				editState.set(null);
+			void saveEdit(textarea.value).then((saved) => {
+				if (saved) editState.set(null);
 			});
 		});
 
@@ -478,8 +480,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				editState.set(null);
 			} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
 				evt.preventDefault();
-				void saveEdit(textarea.value).then(() => {
-					editState.set(null);
+				void saveEdit(textarea.value).then((saved) => {
+					if (saved) editState.set(null);
 				});
 			}
 		});
@@ -490,8 +492,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			if (!popover.contains(target) && !root.contains(target)) {
 				document.removeEventListener('mousedown', onClickOutside, true);
 				if (peek(saveOnBlur)) {
-					void saveEdit(textarea.value).then(() => {
-						editState.set(null);
+					void saveEdit(textarea.value).then((saved) => {
+						if (saved) editState.set(null);
 					});
 				} else {
 					editState.set(null);
@@ -510,13 +512,24 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		popover.appendChild(textarea);
 		popover.appendChild(btnBar);
 
-		// Position below the chip
-		const rect = root.getBoundingClientRect();
-
-		popover.style.top = `${rect.bottom + 4}px`;
-		popover.style.left = `${rect.left}px`;
-
+		// Position below the chip, clamped to viewport
 		document.body.appendChild(popover);
+		const rect = root.getBoundingClientRect();
+		const margin = 4;
+		const popW = popover.offsetWidth;
+		const popH = popover.offsetHeight;
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+
+		// Flip above the chip if not enough room below
+		const top = (rect.bottom + popH + margin > vh && rect.top - popH - margin >= 0)
+			? rect.top - popH - margin
+			: rect.bottom + margin;
+		// Clamp horizontally
+		const left = Math.max(margin, Math.min(rect.left, vw - popW - margin));
+
+		popover.style.top = `${top}px`;
+		popover.style.left = `${left}px`;
 		activePopover = popover;
 
 		// Store cleanup for the click-outside listener
@@ -536,11 +549,11 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 	// ── Save helper ──────────────────────────────────────────────────────────
 
-	async function saveEdit(newValue: string): Promise<void> {
+	async function saveEdit(newValue: string): Promise<boolean> {
 		const config = peek(profileConfig);
 		if (!config) {
 			new Notice('Profile configuration not found');
-			return;
+			return false;
 		}
 		try {
 			await plugin.sessionService.setFieldValue(
@@ -552,9 +565,11 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			);
 			root.dataset.vcCopyText = newValue;
 			justSaved.set(true);
+			return true;
 		} catch (err) {
 			console.error('[VaultCrypt] Failed to save field', err);
 			new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
 		}
 	}
 
