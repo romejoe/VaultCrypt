@@ -111,14 +111,17 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('Clipboard clear timer (seconds)')
-			.setDesc('Time in seconds before clearing clipboard after copying a secret')
-			.addSlider(slider => slider
-				.setLimits(1, 60, 1)
-				.setValue(this.plugin.settings.security.clipboardClearSeconds)
-				.setDynamicTooltip()
+			.setName('Clipboard clear timer')
+			.setDesc('How long after copying before the clipboard is cleared. Set to Disabled to turn off.')
+			.addDropdown(drop => drop
+				.addOption('0',   'Disabled')
+				.addOption('15',  '15 seconds')
+				.addOption('30',  '30 seconds')
+				.addOption('60',  '60 seconds')
+				.addOption('120', '120 seconds')
+				.setValue(String(this.plugin.settings.security.clipboardClearSeconds))
 				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.security.clipboardClearSeconds = value; });
+					this.plugin.patchSettings(s => { s.security.clipboardClearSeconds = Number(value); });
 				}));
 
 		// General section

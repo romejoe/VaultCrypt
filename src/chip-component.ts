@@ -256,10 +256,11 @@ function copyField(
 	}
 	const value: string = rawValue;
 
+	const secs = plugin.settings.security.clipboardClearSeconds;
 	function onCopySuccess() {
-		new Notice('Copied to clipboard', 3000);
-		const secs = plugin.settings.security.clipboardClearSeconds;
-		if (secs !== undefined && secs > 0) {
+		const msg = (secs > 0) ? `Copied to clipboard (clears in ${secs}s)` : 'Copied to clipboard';
+		new Notice(msg, 3000);
+		if (secs > 0) {
 			plugin.scheduleClearClipboardTime(value, secs);
 		}
 	}

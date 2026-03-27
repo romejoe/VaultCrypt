@@ -30,6 +30,20 @@ const DEFAULT_STATE: VaultCryptState = {
 	isLocked: true,
 }
 
+interface ElectronClipboard {
+	writeText(s: string): void;
+	readText(): string;
+}
+
+function getElectronClipboard(): ElectronClipboard | null {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-member-access
+		return (window as any).require?.('electron')?.clipboard ?? null;
+	} catch {
+		return null;
+	}
+}
+
 export default class VaultCryptPlugin extends Plugin {
 
 	private readonly _settings$ = signal<VaultCryptSettings>(DEFAULT_SETTINGS);
@@ -227,9 +241,10 @@ export default class VaultCryptPlugin extends Plugin {
 					return;
 				}
 				navigator.clipboard.writeText(value).then(() => {
-					new Notice('Copied to clipboard', 3000);
 					const secs = this.settings.security.clipboardClearSeconds;
-					if (secs !== undefined && secs > 0) {
+					const msg = (secs > 0) ? `Copied to clipboard (clears in ${secs}s)` : 'Copied to clipboard';
+					new Notice(msg, 3000);
+					if (secs > 0) {
 						this.scheduleClearClipboardTime(value, secs);
 					}
 				}).catch(() => new Notice('Failed to copy to clipboard'));
@@ -478,25 +493,28 @@ export default class VaultCryptPlugin extends Plugin {
 	scheduleClearClipboardTime(value: string, secs: number | undefined) {
 		if (secs === undefined || secs <= 0) return;
 		const timeoutId = window.setTimeout(() => {
-			navigator.clipboard.readText().then(current => {
-				if (current === value) {
-					navigator.clipboard.writeText('').then(() => {
-						console.debug('[VaultCrypt] Clipboard cleared');
-					}, () => {
-						new Notice('Failed to clear clipboard');
-						console.debug('[VaultCrypt] Failed to clear clipboard');
-
-					});
+			const ec = getElectronClipboard();
+			if (ec) {
+				if (ec.readText() === value) {
+					ec.writeText('');
+					console.debug('[VaultCrypt] Clipboard cleared (Electron)');
 				}
-			}).catch(() => {
-				// readText may be denied; best-effort clear
-				new Notice('Skipping clipboard clear because current contents could not be verified');
-			});
+			} else {
+				navigator.clipboard.readText().then(current => {
+					if (current === value) {
+						navigator.clipboard.writeText('').then(
+							() => console.debug('[VaultCrypt] Clipboard cleared'),
+							() => new Notice('Failed to clear clipboard'),
+						);
+					}
+				}).catch(() => {
+					// readText may be denied; best-effort clear
+					new Notice('Skipping clipboard clear because current contents could not be verified');
+				});
+			}
 			this.clearClipboardTimeouts = this.clearClipboardTimeouts.filter(id => id !== timeoutId);
-
-		}, secs * 1000)
+		}, secs * 1000);
 		this.clearClipboardTimeouts.push(timeoutId);
-
 	}
 
 	private mutateState(mutator: (state: VaultCryptState) => void) {
