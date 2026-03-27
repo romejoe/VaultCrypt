@@ -8,6 +8,7 @@ import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
+import {buildCopyTextFromSelection} from './clipboard-intercept';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -300,6 +301,23 @@ export default class VaultCryptPlugin extends Plugin {
 		// Reading mode post-processor
 		this.registerMarkdownPostProcessor((el) => {
 			processVcTokensInDom(el, (token) => buildChipElement(token, this));
+		});
+
+		// Clipboard interception for reading mode (CM6 is handled in editor-extension.ts)
+		this.registerDomEvent(document, 'copy', (event: ClipboardEvent) => {
+			const sel = window.getSelection();
+			if (!sel || sel.rangeCount === 0) return;
+
+			// Skip if selection is inside a CM6 editor (handled by the editor extension)
+			const ancestor = sel.getRangeAt(0).commonAncestorContainer;
+			const container = ancestor instanceof HTMLElement ? ancestor : ancestor.parentElement;
+			if (container?.closest('.cm-editor')) return;
+
+			const copyText = buildCopyTextFromSelection(sel, this);
+			if (copyText === null) return;
+
+			event.clipboardData?.setData('text/plain', copyText);
+			event.preventDefault();
 		});
 
 		// Settings tab
