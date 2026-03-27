@@ -918,13 +918,11 @@ export class AddToKeyringModal extends Modal {
 			// Mark as managed
 			this.plugin.patchSettings((s: VaultCryptSettings) => {
 				const profile = s.profiles[this.selectedProfileId];
-				console.log("Settings: Adding profile to keyring", profile);
 				if (profile) profile.managedByKeyring = true;
 			});
 
 			this.plugin.mutateState((s: VaultCryptState) => {
 				const profile = s.profiles.find(profile => profile.id === this.selectedProfileId);
-				console.log("State: Adding profile to keyring", profile);
 				if (profile) profile.managedByKeyring = true;
 			});
 
@@ -1010,13 +1008,11 @@ export class RemoveFromKeyringModal extends Modal {
 			);
 			this.plugin.patchSettings((s: VaultCryptSettings) => {
 				const profile = s.profiles[this.profileId];
-				console.log("Settings: Removing profile from keyring", profile);
 				if (profile) profile.managedByKeyring = false;
 			});
 
 			this.plugin.mutateState((s: VaultCryptState) => {
 				const profile = s.profiles.find(profile => profile.id === this.profileId);
-				console.log("State: Removing profile from keyring", profile);
 				if (profile) profile.managedByKeyring = false;
 			})
 
