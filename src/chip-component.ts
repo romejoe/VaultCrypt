@@ -359,7 +359,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			if (evt.key === 'Enter') {
 				evt.preventDefault();
 				saving = true;
-				saveEdit(input.value).then(() => {
+				void saveEdit(input.value).then(() => {
 					editState.set(null);
 				});
 			} else if (evt.key === 'Escape') {
@@ -373,7 +373,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			// If editState was already cleared (e.g. by Escape) or changed (mode switch), skip
 			if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
 			if (peek(saveOnBlur)) {
-				saveEdit(input.value).then(() => {
+				void saveEdit(input.value).then(() => {
 					editState.set(null);
 				});
 			} else {
@@ -420,6 +420,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		const labelEl = document.createElement('span');
 		labelEl.className = 'vaultcrypt-chip-value';
+
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		labelEl.textContent = 'editing\u2026';
 
 		root.appendChild(iconEl);
@@ -441,12 +443,13 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		saveBtn.className = 'mod-cta';
 		saveBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			saveEdit(textarea.value).then(() => {
+			void saveEdit(textarea.value).then(() => {
 				editState.set(null);
 			});
 		});
 
 		const collapseBtn = document.createElement('button');
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		collapseBtn.textContent = '⤡ Single-line';
 		collapseBtn.title = 'Collapse to single-line input';
 		// Disable when content has multiple lines
@@ -475,7 +478,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				editState.set(null);
 			} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
 				evt.preventDefault();
-				saveEdit(textarea.value).then(() => {
+				void saveEdit(textarea.value).then(() => {
 					editState.set(null);
 				});
 			}
@@ -487,7 +490,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			if (!popover.contains(target) && !root.contains(target)) {
 				document.removeEventListener('mousedown', onClickOutside, true);
 				if (peek(saveOnBlur)) {
-					saveEdit(textarea.value).then(() => {
+					void saveEdit(textarea.value).then(() => {
 						editState.set(null);
 					});
 				} else {
@@ -509,9 +512,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		// Position below the chip
 		const rect = root.getBoundingClientRect();
-		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
+
 		popover.style.top = `${rect.bottom + 4}px`;
-		// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 		popover.style.left = `${rect.left}px`;
 
 		document.body.appendChild(popover);
