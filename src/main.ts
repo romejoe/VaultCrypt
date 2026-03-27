@@ -375,6 +375,7 @@ export default class VaultCryptPlugin extends Plugin {
 					lastUnlock: existing?.lastUnlock ?? null,
 				};
 			});
+			state.isLocked = state.profiles.every(p => p.isLocked);
 			// currentProfile: keep if still present, otherwise null
 			if (state.currentProfile) {
 				const still = state.profiles.find(
