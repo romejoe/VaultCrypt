@@ -211,7 +211,7 @@ export class AddProfileModal extends Modal {
 
 			new Setting(contentEl)
 				.setName("Add to keyring")
-				.setDesc("Store this profile's password in the keyring for unified unlock")
+				.setDesc("Enables unified unlock, but compromising the keyring exposes all managed profile passwords at once.")
 				.addToggle(toggle => toggle
 					.setValue(this.addToKeyring)
 					.onChange(value => {
@@ -270,26 +270,26 @@ export class AddProfileModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
+			// Preflight the keyring write before creating the profile so a bad
+			// keyring password doesn't leave a half-created profile behind
+			if (this.addToKeyring) {
+				await this.plugin.keyringService.setProfilePassword(
+					this.plugin.settings.masterKeyringPath,
+					this.keyringPassword,
+					this.name.toLowerCase(),
+					this.password,
+				);
+			}
+
 			await this.plugin.addProfile(this.name, this.password, this.version);
 
-			// Store in keyring if requested
+			// Mark as managed now that both the keyring write and profile creation succeeded
 			if (this.addToKeyring) {
-				try {
-					const profileId = this.name.toLowerCase();
-					await this.plugin.keyringService.setProfilePassword(
-						this.plugin.settings.masterKeyringPath,
-						this.keyringPassword,
-						profileId,
-						this.password,
-					);
-					this.plugin.patchSettings((s: VaultCryptSettings) => {
-						const profile = s.profiles[profileId];
-						if (profile) profile.managedByKeyring = true;
-					});
-				} catch (e) {
-					console.error("Failed to add profile to keyring:", e);
-					new Notice("Profile was created, but there was an error adding it to the keyring. Please check console for details.");
-				}
+				const profileId = this.name.toLowerCase();
+				this.plugin.patchSettings((s: VaultCryptSettings) => {
+					const profile = s.profiles[profileId];
+					if (profile) profile.managedByKeyring = true;
+				});
 			}
 
 			this.close();
@@ -485,7 +485,7 @@ export class RenameProfileModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			// Rename keyring entry first
+			// Rename keyring entry first; roll it back if the profile rename fails
 			if (this.isManagedByKeyring) {
 				await this.plugin.keyringService.renameProfileEntry(
 					this.plugin.settings.masterKeyringPath,
@@ -494,7 +494,23 @@ export class RenameProfileModal extends Modal {
 					normalizedNewName,
 				);
 			}
-			await this.plugin.renameProfile(this.currentName, this.newName);
+			try {
+				await this.plugin.renameProfile(this.currentName, this.newName);
+			} catch (e) {
+				if (this.isManagedByKeyring) {
+					try {
+						await this.plugin.keyringService.renameProfileEntry(
+							this.plugin.settings.masterKeyringPath,
+							this.keyringPassword,
+							normalizedNewName,
+							normalizedCurrentName,
+						);
+					} catch (rollbackErr) {
+						console.error('[VaultCrypt] Failed to roll back keyring rename:', rollbackErr);
+					}
+				}
+				throw e;
+			}
 			this.close();
 			this.onDone();
 		} catch (e) {
@@ -582,17 +598,14 @@ export class DeleteProfileModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			// Remove from keyring first (best-effort)
+			// Remove from keyring before deleting the profile; fail closed so a
+			// wrong password or write error doesn't leave an orphaned keyring entry
 			if (this.config.managedByKeyring) {
-				try {
-					await this.plugin.keyringService.removeProfilePassword(
-						this.plugin.settings.masterKeyringPath,
-						this.keyringPassword,
-						this.profileName.toLowerCase(),
-					);
-				} catch (e) {
-					console.warn('[VaultCrypt] Failed to remove profile from keyring:', e);
-				}
+				await this.plugin.keyringService.removeProfilePassword(
+					this.plugin.settings.masterKeyringPath,
+					this.keyringPassword,
+					this.profileName.toLowerCase(),
+				);
 			}
 			await this.plugin.deleteProfile(this.profileName, this.deleteFile);
 			this.close();
@@ -639,6 +652,11 @@ export class SetupKeyringModal extends Modal {
 		contentEl.createEl("p", {
 			text: "Create a master password that will unlock all your profiles. " +
 				"Profile passwords will be stored in an encrypted keyring file.",
+		});
+		contentEl.createEl("p", {
+			text: "⚠ Security tradeoff: if the keyring file or its master password " +
+				"is compromised, every managed profile password is exposed at once.",
+			cls: "mod-warning",
 		});
 
 		new Setting(contentEl)
@@ -857,6 +875,11 @@ export class AddToKeyringModal extends Modal {
 	onOpen() {
 		const {contentEl} = this;
 		this.titleEl.setText("Add profile to keyring");
+
+		contentEl.createEl("p", {
+			text: "⚠ Security tradeoff: adding a profile to the keyring means a compromised keyring or master password exposes this profile password alongside all others.",
+			cls: "mod-warning",
+		});
 
 		const profiles = this.plugin.settings.profiles;
 		const unmanagedIds = Object.entries(profiles)

@@ -126,8 +126,11 @@ export class KeyringService {
 	async deleteKeyring(path: string): Promise<void> {
 		try {
 			await this.adapter.remove(path);
-		} catch {
-			// File may already be gone — acceptable
+		} catch (e) {
+			// Only swallow "file already gone" — rethrow real I/O failures
+			if (await this.adapter.exists(path)) {
+				throw e;
+			}
 		}
 	}
 
