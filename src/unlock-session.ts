@@ -40,6 +40,25 @@ export class UnlockSessionService {
 		this.emitUnlock(profileId);
 	}
 
+	/**
+	 * Verifies a password against a profile's KDBX file without mutating session state.
+	 * Returns true if the password is correct, false if wrong.
+	 * Throws on I/O errors or a corrupted database.
+	 */
+	async checkProfilePassword(config: ProfileConfig, password: string): Promise<boolean> {
+		const buffer = await this.adapter.readBinary(config.path);
+		const credentials = new kdbxweb.KdbxCredentials(
+			kdbxweb.ProtectedValue.fromString(password)
+		);
+		try {
+			const db = await kdbxweb.Kdbx.load(buffer, credentials);
+			db.cleanup();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
 	/** Removes a profile's database from memory and clears its timer. */
 	lockProfile(profileId: string): void {
 		if (this.openDbs.has(profileId)) {

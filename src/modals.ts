@@ -199,7 +199,9 @@ export class AddProfileModal extends Modal {
 				.addText(text => {
 					text.inputEl.type = "password";
 					text.setPlaceholder("Enter keyring password")
-						.onChange(value => { this.keyringPassword = value; });
+						.onChange(value => {
+							this.keyringPassword = value;
+						});
 				});
 
 			const updateKeyringVisibility = (show: boolean) => {
@@ -272,17 +274,22 @@ export class AddProfileModal extends Modal {
 
 			// Store in keyring if requested
 			if (this.addToKeyring) {
-				const profileId = this.name.toLowerCase();
-				await this.plugin.keyringService.setProfilePassword(
-					this.plugin.settings.masterKeyringPath,
-					this.keyringPassword,
-					profileId,
-					this.password,
-				);
-				this.plugin.patchSettings((s: VaultCryptSettings) => {
-					const profile = s.profiles[profileId];
-					if (profile) profile.managedByKeyring = true;
-				});
+				try {
+					const profileId = this.name.toLowerCase();
+					await this.plugin.keyringService.setProfilePassword(
+						this.plugin.settings.masterKeyringPath,
+						this.keyringPassword,
+						profileId,
+						this.password,
+					);
+					this.plugin.patchSettings((s: VaultCryptSettings) => {
+						const profile = s.profiles[profileId];
+						if (profile) profile.managedByKeyring = true;
+					});
+				} catch (e) {
+					console.error("Failed to add profile to keyring:", e);
+					new Notice("Profile was created, but there was an error adding it to the keyring. Please check console for details.");
+				}
 			}
 
 			this.close();
@@ -427,7 +434,9 @@ export class RenameProfileModal extends Modal {
 				.addText(text => {
 					text.inputEl.type = "password";
 					text.setPlaceholder("Enter keyring password")
-						.onChange(value => { this.keyringPassword = value; });
+						.onChange(value => {
+							this.keyringPassword = value;
+						});
 				});
 		}
 
@@ -461,6 +470,13 @@ export class RenameProfileModal extends Modal {
 			return;
 		}
 
+		const normalizedCurrentName = this.currentName.toLowerCase();
+		const normalizedNewName = this.newName.toLowerCase();
+		if (normalizedNewName === normalizedCurrentName) {
+			this.showError("Enter a different profile name.");
+			return;
+		}
+
 		if (this.isManagedByKeyring && !this.keyringPassword) {
 			this.showError("Keyring master password is required to rename a keyring-managed profile.");
 			return;
@@ -474,8 +490,8 @@ export class RenameProfileModal extends Modal {
 				await this.plugin.keyringService.renameProfileEntry(
 					this.plugin.settings.masterKeyringPath,
 					this.keyringPassword,
-					this.currentName.toLowerCase(),
-					this.newName.toLowerCase(),
+					normalizedCurrentName,
+					normalizedNewName,
 				);
 			}
 			await this.plugin.renameProfile(this.currentName, this.newName);
@@ -631,7 +647,9 @@ export class SetupKeyringModal extends Modal {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
 				text.setPlaceholder("Enter master password")
-					.onChange(value => { this.password = value; });
+					.onChange(value => {
+						this.password = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -642,7 +660,9 @@ export class SetupKeyringModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Confirm master password")
-					.onChange(value => { this.confirmPassword = value; });
+					.onChange(value => {
+						this.confirmPassword = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -668,8 +688,14 @@ export class SetupKeyringModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.password) { this.showError("Master password is required."); return; }
-		if (this.password !== this.confirmPassword) { this.showError("Passwords do not match."); return; }
+		if (!this.password) {
+			this.showError("Master password is required.");
+			return;
+		}
+		if (this.password !== this.confirmPassword) {
+			this.showError("Passwords do not match.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -678,7 +704,9 @@ export class SetupKeyringModal extends Modal {
 				this.plugin.settings.masterKeyringPath,
 				this.password,
 			);
-			this.plugin.patchSettings((s: VaultCryptSettings) => { s.keyringEnabled = true; });
+			this.plugin.patchSettings((s: VaultCryptSettings) => {
+				s.keyringEnabled = true;
+			});
 			new Notice("Keyring created successfully.");
 			this.close();
 			this.onDone();
@@ -690,7 +718,9 @@ export class SetupKeyringModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
 
 export class KeyringUnlockModal extends Modal {
@@ -724,7 +754,9 @@ export class KeyringUnlockModal extends Modal {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
 				text.setPlaceholder("Enter keyring master password")
-					.onChange(value => { this.password = value; });
+					.onChange(value => {
+						this.password = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -750,7 +782,10 @@ export class KeyringUnlockModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.password) { this.showError("Master password is required."); return; }
+		if (!this.password) {
+			this.showError("Master password is required.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -798,7 +833,9 @@ export class KeyringUnlockModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
 
 export class AddToKeyringModal extends Modal {
@@ -842,7 +879,9 @@ export class AddToKeyringModal extends Modal {
 					dd.addOption(id, id);
 				}
 				dd.setValue(this.selectedProfileId)
-					.onChange(value => { this.selectedProfileId = value; });
+					.onChange(value => {
+						this.selectedProfileId = value;
+					});
 			});
 
 		new Setting(contentEl)
@@ -851,7 +890,9 @@ export class AddToKeyringModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter profile password")
-					.onChange(value => { this.profilePassword = value; });
+					.onChange(value => {
+						this.profilePassword = value;
+					});
 			});
 
 		new Setting(contentEl)
@@ -859,7 +900,9 @@ export class AddToKeyringModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter keyring password")
-					.onChange(value => { this.keyringPassword = value; });
+					.onChange(value => {
+						this.keyringPassword = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -885,26 +928,33 @@ export class AddToKeyringModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.selectedProfileId) { this.showError("No profile selected."); return; }
-		if (!this.profilePassword) { this.showError("Profile password is required."); return; }
-		if (!this.keyringPassword) { this.showError("Keyring master password is required."); return; }
+		if (!this.selectedProfileId) {
+			this.showError("No profile selected.");
+			return;
+		}
+		if (!this.profilePassword) {
+			this.showError("Profile password is required.");
+			return;
+		}
+		if (!this.keyringPassword) {
+			this.showError("Keyring master password is required.");
+			return;
+		}
 
 		const config = this.plugin.settings.profiles[this.selectedProfileId];
-		if (!config) { this.showError("Profile not found."); return; }
+		if (!config) {
+			this.showError("Profile not found.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			// Verify the profile password by trying to unlock (then lock if it wasn't already open)
-			const wasUnlocked = this.plugin.sessionService.isUnlocked(this.selectedProfileId);
-			try {
-				await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, this.profilePassword);
-			} catch {
+			// Verify the profile password without mutating session state
+			const passwordCorrect = await this.plugin.sessionService.checkProfilePassword(config, this.profilePassword);
+			if (!passwordCorrect) {
 				this.showError("Incorrect profile password.");
 				return;
-			}
-			if (!wasUnlocked) {
-				this.plugin.sessionService.lockProfile(this.selectedProfileId);
 			}
 
 			// Store in keyring
@@ -937,7 +987,9 @@ export class AddToKeyringModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
 
 export class RemoveFromKeyringModal extends Modal {
@@ -970,7 +1022,9 @@ export class RemoveFromKeyringModal extends Modal {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
 				text.setPlaceholder("Enter keyring password")
-					.onChange(value => { this.keyringPassword = value; });
+					.onChange(value => {
+						this.keyringPassword = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -996,7 +1050,10 @@ export class RemoveFromKeyringModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.keyringPassword) { this.showError("Keyring master password is required."); return; }
+		if (!this.keyringPassword) {
+			this.showError("Keyring master password is required.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -1027,7 +1084,9 @@ export class RemoveFromKeyringModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
 
 export class ChangeKeyringPasswordModal extends Modal {
@@ -1056,7 +1115,9 @@ export class ChangeKeyringPasswordModal extends Modal {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
 				text.setPlaceholder("Enter current password")
-					.onChange(value => { this.currentPassword = value; });
+					.onChange(value => {
+						this.currentPassword = value;
+					});
 			});
 
 		new Setting(contentEl)
@@ -1064,7 +1125,9 @@ export class ChangeKeyringPasswordModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter new password")
-					.onChange(value => { this.newPassword = value; });
+					.onChange(value => {
+						this.newPassword = value;
+					});
 			});
 
 		new Setting(contentEl)
@@ -1072,7 +1135,9 @@ export class ChangeKeyringPasswordModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Confirm new password")
-					.onChange(value => { this.confirmPassword = value; });
+					.onChange(value => {
+						this.confirmPassword = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -1098,9 +1163,18 @@ export class ChangeKeyringPasswordModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.currentPassword) { this.showError("Current password is required."); return; }
-		if (!this.newPassword) { this.showError("New password is required."); return; }
-		if (this.newPassword !== this.confirmPassword) { this.showError("Passwords do not match."); return; }
+		if (!this.currentPassword) {
+			this.showError("Current password is required.");
+			return;
+		}
+		if (!this.newPassword) {
+			this.showError("New password is required.");
+			return;
+		}
+		if (this.newPassword !== this.confirmPassword) {
+			this.showError("Passwords do not match.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -1121,7 +1195,9 @@ export class ChangeKeyringPasswordModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
 
 export class DeleteKeyringModal extends Modal {
@@ -1155,7 +1231,9 @@ export class DeleteKeyringModal extends Modal {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
 				text.setPlaceholder("Enter keyring password")
-					.onChange(value => { this.password = value; });
+					.onChange(value => {
+						this.password = value;
+					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
 				});
@@ -1181,7 +1259,10 @@ export class DeleteKeyringModal extends Modal {
 
 	private async submit() {
 		if (this.isSubmitting) return;
-		if (!this.password) { this.showError("Password is required to confirm deletion."); return; }
+		if (!this.password) {
+			this.showError("Password is required to confirm deletion.");
+			return;
+		}
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -1218,5 +1299,7 @@ export class DeleteKeyringModal extends Modal {
 		}
 	}
 
-	onClose() { this.contentEl.empty(); }
+	onClose() {
+		this.contentEl.empty();
+	}
 }
