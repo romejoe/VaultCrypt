@@ -213,7 +213,7 @@ export default class VaultCryptPlugin extends Plugin {
 				const cursor = editor.getCursor();
 				const lineText = editor.getLine(cursor.line);
 				const tokens = parseVcTokens(lineText);
-				const token = tokens.find(t => cursor.ch >= t.from && cursor.ch <= t.to);
+				const token = tokens.find(t => cursor.ch >= t.from && cursor.ch < t.to);
 				if (!token) {
 					new Notice('No secret token under cursor');
 					return;

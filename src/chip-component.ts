@@ -266,8 +266,9 @@ function copyField(
 
 	navigator.clipboard.writeText(value).then(onCopySuccess).catch(() => {
 		// Fallback for mobile WebViews where the Clipboard API may be unavailable
+		let textarea: HTMLTextAreaElement|null = null;
 		try {
-			const textarea = document.createElement('textarea');
+			textarea = document.createElement('textarea');
 			textarea.value = value;
 			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
 			textarea.style.cssText = 'position:fixed;opacity:0;';
@@ -283,6 +284,9 @@ function copyField(
 				new Notice('Failed to copy to clipboard');
 			}
 		} catch {
+			if(textarea !== null){
+				textarea.remove();
+			}
 			new Notice('Failed to copy to clipboard');
 		}
 	});
