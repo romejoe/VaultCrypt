@@ -18,6 +18,8 @@ export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
  *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
  *   profile unlocked →  masked chip (copy) ⟷ revealed chip (show value, edit stub, copy)
+ *                        ↓ on getFieldValue null
+ *                       masked-error chip (verbose reason, retry button)
  */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
@@ -35,7 +37,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	});
 
 	const root = document.createElement('span');
-	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown'>('locked');
+	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
+	const errorReason = signal<string>('');
 
 
 	const field = computed(() => {
@@ -58,6 +61,9 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		effect(() => {
 			root.title = tooltipPath();
 		}),
+		effect(() =>{
+			console.log("Error message:" + errorReason());
+		}),
 
 		effect(() => {
 			const currentState = chipState();
@@ -78,7 +84,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				return;
 			}
 
-			if (currentState === 'unknown' || currentState === 'revealed') {
+			if (currentState === 'unknown' || currentState === 'revealed' || currentState === 'masked-error') {
 				return;
 			}
 
@@ -99,11 +105,15 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			} else if (currentState === 'revealed') {
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
-					chipState.set('masked');
-					renderMasked();
+					errorReason.set(`Entry or field not found: ${peek(tooltipPath)}`);
+					chipState.set('masked-error');
+					renderMaskedError(peek(errorReason));
+
 				} else {
 					renderRevealed(value);
 				}
+			} else if (currentState === 'masked-error') {
+				renderMaskedError(peek(errorReason));
 			}
 		})
 	];
@@ -163,6 +173,28 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		root.appendChild(iconEl);
 		root.appendChild(dotsEl);
 		root.appendChild(copyBtn);
+	}
+
+	function renderMaskedError(reason: string) {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.textContent = '⚠';
+		iconEl.className = 'vaultcrypt-chip-icon';
+
+		const labelEl = document.createElement('span');
+		labelEl.textContent = reason;
+
+		const retryBtn = makeButton('🔄', 'Retry');
+		retryBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			chipState.set('masked');
+		});
+
+		root.appendChild(iconEl);
+		root.appendChild(labelEl);
+		root.appendChild(retryBtn);
 	}
 
 	function renderRevealed(value: string) {

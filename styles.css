@@ -61,6 +61,13 @@ If your plugin does not need CSS, delete this file.
 	cursor: default;
 }
 
+/* Masked-error: profile unlocked but entry/field could not be found */
+.vaultcrypt-chip-masked-error {
+	background: rgba(var(--color-orange-rgb), 0.15);
+	color: var(--text-warning);
+	cursor: default;
+}
+
 /* Revealed: plaintext value is shown */
 .vaultcrypt-chip-revealed {
 	background: rgba(var(--color-green-rgb), 0.15);
