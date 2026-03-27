@@ -6,18 +6,25 @@ import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
+/** Editing sub-state: mode + in-progress value, or null when not editing. */
+interface EditState {
+	mode: 'inline' | 'multiline';
+	value: string;
+}
+
 /**
  * Builds an interactive inline chip element for a parsed {{vc:...}} token.
  *
  * A single root <span> is created and its children are mutated in-place
- * whenever state changes (locked → masked → revealed → masked …). This is
- * critical for the CodeMirror live-preview mode, which owns the root element
- * and would discard any element that replaces it via replaceWith().
+ * whenever state changes (locked → masked → revealed → editing → masked …).
+ * This is critical for the CodeMirror live-preview mode, which owns the root
+ * element and would discard any element that replaces it via replaceWith().
  *
  * State machine:
  *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
- *   profile unlocked →  masked chip (copy) ⟷ revealed chip (show value, edit stub, copy)
+ *   profile unlocked →  masked chip (copy) ⟷ revealed chip (show value, edit, copy)
+ *                                                ⟷ editing chip (inline input / popover)
  *                        ↓ on getFieldValue null
  *                       masked-error chip (verbose reason, retry button)
  */
@@ -36,11 +43,25 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		return plugin.settings$().general.autoUnmask;
 	});
 
+	const saveOnBlur = computed(() => {
+		return plugin.settings$().general.saveOnBlur;
+	});
+
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const errorReason = signal<string>('');
+	const justSaved = signal(false);
 
+	/**
+	 * Editing sub-state signal. null = not editing. When non-null, holds the
+	 * current editor mode and the in-progress value so that switching between
+	 * inline ↔ multiline preserves the user's text.
+	 */
+	const editState = signal<EditState | null>(null);
+
+	// Reference to an active multi-line popover for cleanup
+	let activePopover: HTMLElement | null = null;
 
 	const field = computed(() => {
 		const config = profileConfig();
@@ -51,12 +72,30 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		return `${profileId}/${token.entryPath}#${field()}`;
 	})
 
+	let cleanupPopover = () => {
+		if (activePopover) {
+			activePopover.remove();
+			activePopover = null;
+		}
+	};
+
 	root.addEventListener(CHIP_DESTROY_EVENT, (evt) => {
+		cleanupPopover();
 		for (const effect of effects) {
 			effect?.();
 		}
 	})
 
+	/** Enter editing mode — reads the current db value (or empty string) and auto-detects mode. */
+	function startEditing() {
+		if (!plugin.sessionService?.isUnlocked(profileId)) {
+			new Notice('Profile is locked — cannot edit.');
+			return;
+		}
+		const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field)) ?? '';
+		const isMultiline = value.includes('\n') || peek(field).toLowerCase() === 'notes';
+		editState.set({mode: isMultiline ? 'multiline' : 'inline', value});
+	}
 
 	effects = [
 		effect(() => {
@@ -78,6 +117,11 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			})?.isLocked ?? true;
 
 			if (profileLocked) {
+				// Cancel editing if profile locks
+				if (peek(editState) !== null) {
+					editState.set(null);
+					cleanupPopover();
+				}
 				chipState.set('locked');
 				return;
 			}
@@ -101,6 +145,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			} else if (currentState === 'masked') {
 				renderMasked();
 			} else if (currentState === 'revealed') {
+				// Skip re-render if we're in editing mode
+				if (peek(editState) !== null) return;
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
 					errorReason.set(`Entry or field not found: ${peek(tooltipPath)}`);
@@ -113,7 +159,32 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			} else if (currentState === 'masked-error') {
 				renderMaskedError(peek(errorReason));
 			}
-		})
+		}),
+
+		// ── Editing effect — watches editState signal ──────────────────────
+		effect(() => {
+			const es = editState();
+			if (es !== null) {
+				if (es.mode === 'multiline') {
+					renderEditingMultiline(es.value);
+				} else {
+					renderEditingInline(es.value);
+				}
+			} else {
+				cleanupPopover();
+				// Re-render after editing ends — transition to revealed if a value now exists
+				const currentState = peek(chipState);
+				if (currentState === 'revealed' || currentState === 'masked-error') {
+					const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field));
+					if (value !== null && value !== undefined) {
+						chipState.set('revealed');
+						renderRevealed(value);
+					} else if (currentState === 'masked-error') {
+						renderMaskedError(peek(errorReason));
+					}
+				}
+			}
+		}),
 	];
 
 	// ── Inner render functions — each clears root's children then repopulates ──
@@ -188,6 +259,12 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const labelEl = document.createElement('span');
 		labelEl.textContent = reason;
 
+		const editBtn = makeButton('✏️', 'Create and edit');
+		editBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			startEditing();
+		});
+
 		const retryBtn = makeButton('🔄', 'Retry');
 		retryBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
@@ -196,6 +273,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		root.appendChild(iconEl);
 		root.appendChild(labelEl);
+		if (!compact()) root.appendChild(editBtn);
 		root.appendChild(retryBtn);
 	}
 
@@ -217,12 +295,22 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		valueEl.className = 'vaultcrypt-chip-value';
 		valueEl.textContent = value;
 
-
-		const editBtn = makeButton('✏️', 'Edit (coming soon)');
+		const editBtn = makeButton('✏️', 'Edit');
 		editBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			new Notice('Edit — coming soon');
+			startEditing();
 		});
+
+		// Show save confirmation checkmark briefly after a successful save
+		if (peek(justSaved)) {
+			justSaved.set(false);
+			editBtn.textContent = '✅';
+			editBtn.className = 'vaultcrypt-chip-btn vaultcrypt-chip-btn-saved';
+			setTimeout(() => {
+				editBtn.textContent = '✏️';
+				editBtn.className = 'vaultcrypt-chip-btn';
+			}, 1500);
+		}
 
 		const copyBtn = makeButton('📋', 'Copy to clipboard');
 		copyBtn.addEventListener('click', (evt) => {
@@ -234,6 +322,256 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		root.appendChild(valueEl);
 		if (!compact()) root.appendChild(editBtn);
 		root.appendChild(copyBtn);
+	}
+
+	// ── Inline editing (single-line) ─────────────────────────────────────────
+
+	function renderEditingInline(value: string) {
+		cleanupPopover();
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
+		root.dataset.vcCopyText = value;
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
+		iconEl.textContent = '🔓';
+		iconEl.title = 'Click to mask (cancels edit)';
+		iconEl.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			editState.set(null);
+			chipState.set('masked');
+		});
+
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'vaultcrypt-chip-input';
+		input.value = value;
+		input.size = Math.max(value.length, 8);
+
+		let saving = false;
+
+		input.addEventListener('input', () => {
+			input.size = Math.max(input.value.length, 8);
+		});
+
+		input.addEventListener('keydown', (evt) => {
+			evt.stopPropagation();
+			if (evt.key === 'Enter') {
+				evt.preventDefault();
+				saving = true;
+				void saveEdit(input.value).then((saved) => {
+					saving = false;
+					if (saved) editState.set(null);
+				});
+			} else if (evt.key === 'Escape') {
+				evt.preventDefault();
+				editState.set(null);
+			}
+		});
+
+		input.addEventListener('blur', (evt) => {
+			if (saving) return;
+			// If editState was already cleared (e.g. by Escape) or changed (mode switch), skip
+			if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
+			// If focus moved to another element inside the chip (e.g. Tab to expand button), keep editing
+			if (evt.relatedTarget instanceof Node && root.contains(evt.relatedTarget)) return;
+			if (peek(saveOnBlur)) {
+				void saveEdit(input.value).then((saved) => {
+					if (saved) editState.set(null);
+				});
+			} else {
+				editState.set(null);
+			}
+		});
+
+		// Stop click propagation so CodeMirror doesn't steal focus
+		input.addEventListener('click', (evt) => evt.stopPropagation());
+		input.addEventListener('mousedown', (evt) => evt.stopPropagation());
+
+		const expandBtn = makeButton('⤢', 'Expand to multi-line');
+		// preventDefault on mousedown stops the input from losing focus before click fires
+		expandBtn.addEventListener('mousedown', (evt) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+		});
+		expandBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			editState.set({mode: 'multiline', value: input.value});
+		});
+
+		root.appendChild(iconEl);
+		root.appendChild(input);
+		root.appendChild(expandBtn);
+
+		requestAnimationFrame(() => {
+			input.focus();
+			input.select();
+		});
+	}
+
+	// ── Inline editing (multi-line popover) ──────────────────────────────────
+
+	function renderEditingMultiline(value: string) {
+		cleanupPopover();
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
+		root.dataset.vcCopyText = value;
+		root.replaceChildren();
+
+		const iconEl = document.createElement('span');
+		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
+		iconEl.textContent = '🔓';
+
+		const labelEl = document.createElement('span');
+		labelEl.className = 'vaultcrypt-chip-value';
+
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
+		labelEl.textContent = 'editing\u2026';
+
+		root.appendChild(iconEl);
+		root.appendChild(labelEl);
+
+		// Create popover
+		const popover = document.createElement('div');
+		popover.className = 'vaultcrypt-edit-popover';
+
+		const textarea = document.createElement('textarea');
+		textarea.value = value;
+		textarea.rows = Math.min(Math.max(value.split('\n').length, 3), 12);
+
+		const btnBar = document.createElement('div');
+		btnBar.className = 'vaultcrypt-edit-popover-buttons';
+
+		const saveBtn = document.createElement('button');
+		saveBtn.textContent = 'Save';
+		saveBtn.className = 'mod-cta';
+		saveBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			void saveEdit(textarea.value).then((saved) => {
+				if (saved) editState.set(null);
+			});
+		});
+
+		const collapseBtn = document.createElement('button');
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
+		collapseBtn.textContent = '⤡ Single-line';
+		collapseBtn.title = 'Collapse to single-line input';
+		// Disable when content has multiple lines
+		collapseBtn.disabled = textarea.value.includes('\n');
+		collapseBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			if (collapseBtn.disabled) return;
+			editState.set({mode: 'inline', value: textarea.value});
+		});
+
+		const cancelBtn = document.createElement('button');
+		cancelBtn.textContent = 'Cancel';
+		cancelBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			editState.set(null);
+		});
+
+		textarea.addEventListener('input', () => {
+			collapseBtn.disabled = textarea.value.includes('\n');
+		});
+
+		textarea.addEventListener('keydown', (evt) => {
+			evt.stopPropagation();
+			if (evt.key === 'Escape') {
+				evt.preventDefault();
+				editState.set(null);
+			} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
+				evt.preventDefault();
+				void saveEdit(textarea.value).then((saved) => {
+					if (saved) editState.set(null);
+				});
+			}
+		});
+
+		// Click outside popover → save or discard based on setting
+		function onClickOutside(evt: MouseEvent) {
+			const target = evt.target as Node;
+			if (!popover.contains(target) && !root.contains(target)) {
+				document.removeEventListener('mousedown', onClickOutside, true);
+				if (peek(saveOnBlur)) {
+					void saveEdit(textarea.value).then((saved) => {
+						if (saved) editState.set(null);
+					});
+				} else {
+					editState.set(null);
+				}
+			}
+		}
+
+		// Delay adding the listener so the current click doesn't immediately close it
+		requestAnimationFrame(() => {
+			document.addEventListener('mousedown', onClickOutside, true);
+		});
+
+		btnBar.appendChild(collapseBtn);
+		btnBar.appendChild(cancelBtn);
+		btnBar.appendChild(saveBtn);
+		popover.appendChild(textarea);
+		popover.appendChild(btnBar);
+
+		// Position below the chip, clamped to viewport
+		document.body.appendChild(popover);
+		const rect = root.getBoundingClientRect();
+		const margin = 4;
+		const popW = popover.offsetWidth;
+		const popH = popover.offsetHeight;
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+
+		// Flip above the chip if not enough room below
+		const top = (rect.bottom + popH + margin > vh && rect.top - popH - margin >= 0)
+			? rect.top - popH - margin
+			: rect.bottom + margin;
+		// Clamp horizontally
+		const left = Math.max(margin, Math.min(rect.left, vw - popW - margin));
+
+		popover.style.top = `${top}px`;
+		popover.style.left = `${left}px`;
+		activePopover = popover;
+
+		// Store cleanup for the click-outside listener
+		cleanupPopover = function () {
+			document.removeEventListener('mousedown', onClickOutside, true);
+			if (activePopover) {
+				activePopover.remove();
+				activePopover = null;
+			}
+		};
+
+		requestAnimationFrame(() => {
+			textarea.focus();
+			textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+		});
+	}
+
+	// ── Save helper ──────────────────────────────────────────────────────────
+
+	async function saveEdit(newValue: string): Promise<boolean> {
+		const config = peek(profileConfig);
+		if (!config) {
+			new Notice('Profile configuration not found');
+			return false;
+		}
+		try {
+			await plugin.sessionService.setFieldValue(
+				profileId,
+				token.entryPath,
+				peek(field),
+				newValue,
+				config.path,
+			);
+			root.dataset.vcCopyText = newValue;
+			justSaved.set(true);
+			return true;
+		} catch (err) {
+			console.error('[VaultCrypt] Failed to save field', err);
+			new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
 	}
 
 	return root;

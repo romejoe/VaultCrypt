@@ -22,6 +22,7 @@ export interface VaultCryptSettings {
 		defaultProfile: string;
 		compactChips: boolean;
 		autoUnmask: boolean;
+		saveOnBlur: boolean;
 	};
 }
 
@@ -37,6 +38,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		defaultProfile: "",
 		compactChips: false,
 		autoUnmask: false,
+		saveOnBlur: true,
 	}
 }
 
@@ -172,6 +174,17 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.patchSettings(s => {
 						s.general.autoUnmask = value;
+					});
+				}));
+
+		new Setting(containerEl)
+			.setName('Save on blur')
+			.setDesc('When editing a secret inline, save changes when the input loses focus. When off, blur discards changes.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.general.saveOnBlur)
+				.onChange((value) => {
+					this.plugin.patchSettings(s => {
+						s.general.saveOnBlur = value;
 					});
 				}));
 

@@ -2,6 +2,8 @@ import {DataAdapter} from 'obsidian';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 
+const PROTECTED_FIELDS = new Set(['Password']);
+
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
 
@@ -90,28 +92,42 @@ export class UnlockSessionService {
 		const db = this.getDatabase(profileId);
 		if (!db) return null;
 
-		const segments = entryPath.split('/');
-		const title = segments[segments.length - 1];
-		const groupSegments = segments.slice(0, -1);
-
-		// Walk the group hierarchy
-		let group = db.getDefaultGroup();
-		for (const seg of groupSegments) {
-			const child = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
-			if (!child) return null;
-			group = child;
-		}
-
-		const entry = group.entries.find(e => {
-			const t = e.fields.get('Title');
-			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
-			return text === title;
-		});
+		const entry = this.resolveEntry(db, entryPath);
 		if (!entry) return null;
 
 		const fieldVal = entry.fields.get(fieldName);
 		if (fieldVal === undefined) return null;
 		return fieldVal instanceof kdbxweb.ProtectedValue ? fieldVal.getText() : (fieldVal ?? null);
+	}
+
+	/**
+	 * Updates a single field value in an open profile's database and saves to disk.
+	 * Creates the entry (and any intermediate groups) if they don't already exist.
+	 * Throws if the profile is locked.
+	 */
+	async setFieldValue(
+		profileId: string,
+		entryPath: string,
+		fieldName: string,
+		newValue: string,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+
+		let entry = this.resolveEntry(db, entryPath);
+		if (!entry) {
+			entry = this.resolveOrCreateEntry(db, entryPath);
+		}
+
+		const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
+			? kdbxweb.ProtectedValue.fromString(newValue)
+			: newValue;
+		entry.fields.set(fieldName, fieldValue);
+		entry.times.update();
+
+		const buffer = await db.save();
+		await this.adapter.writeBinary(kdbxFilePath, buffer);
 	}
 
 	/** Register a callback to be called when any profile is locked. */
@@ -122,6 +138,52 @@ export class UnlockSessionService {
 	/** Register a callback to be called when any profile is unlocked. */
 	onUnlock(cb: UnlockCallback): void {
 		this.unlockCallbacks.push(cb);
+	}
+
+	private resolveEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry | null {
+		const segments = entryPath.split('/');
+		const title = segments[segments.length - 1];
+		const groupSegments = segments.slice(0, -1);
+
+		let group = db.getDefaultGroup();
+		for (const seg of groupSegments) {
+			const child = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
+			if (!child) return null;
+			group = child;
+		}
+
+		return group.entries.find(e => {
+			const t = e.fields.get('Title');
+			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
+			return text === title;
+		}) ?? null;
+	}
+
+	/**
+	 * Creates an entry (and any intermediate groups) at the given path.
+	 * Sets the Title field to the last path segment.
+	 */
+	private resolveOrCreateEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry {
+		const segments = entryPath.split('/').filter(s => s.length > 0);
+		if (segments.length === 0) {
+			throw new Error(`Invalid entry path: "${entryPath}" — path must contain at least an entry name`);
+		}
+		const title = segments[segments.length - 1]!;
+		const groupSegments = segments.slice(0, -1);
+
+		let group = db.getDefaultGroup();
+		for (const seg of groupSegments) {
+			const existing = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
+			if (existing) {
+				group = existing;
+			} else {
+				group = db.createGroup(group, seg);
+			}
+		}
+
+		const entry = db.createEntry(group);
+		entry.fields.set('Title', title);
+		return entry;
 	}
 
 	private scheduleAutoLock(profileId: string, autoLockMinutes: number): void {
