@@ -112,6 +112,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Clipboard clear timer')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('How long after copying before the clipboard is cleared. Set to Disabled to turn off.')
 			.addDropdown(drop => drop
 				.addOption('0',   'Disabled')
