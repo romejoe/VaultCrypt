@@ -291,9 +291,16 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			chipState.set('masked');
 		});
 
+		const MAX_DISPLAY = 40;
+		const firstNonEmpty = value.split('\n').find(l => l.trim() !== '') ?? '';
+		let display = firstNonEmpty.slice(0, MAX_DISPLAY);
+		const isTruncated = display.length < value.length || value.includes('\n');
+		if (isTruncated) display += '…';
+
 		const valueEl = document.createElement('span');
 		valueEl.className = 'vaultcrypt-chip-value';
-		valueEl.textContent = value;
+		valueEl.textContent = display;
+		if (isTruncated) valueEl.title = value;
 
 		const editBtn = makeButton('✏️', 'Edit');
 		editBtn.addEventListener('click', (evt) => {
