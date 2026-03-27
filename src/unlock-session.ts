@@ -102,7 +102,8 @@ export class UnlockSessionService {
 
 	/**
 	 * Updates a single field value in an open profile's database and saves to disk.
-	 * Throws if the profile is locked or the entry cannot be found.
+	 * Creates the entry (and any intermediate groups) if they don't already exist.
+	 * Throws if the profile is locked.
 	 */
 	async setFieldValue(
 		profileId: string,
@@ -114,8 +115,10 @@ export class UnlockSessionService {
 		const db = this.getDatabase(profileId);
 		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
 
-		const entry = this.resolveEntry(db, entryPath);
-		if (!entry) throw new Error(`Entry not found: ${entryPath}`);
+		let entry = this.resolveEntry(db, entryPath);
+		if (!entry) {
+			entry = this.resolveOrCreateEntry(db, entryPath);
+		}
 
 		const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
 			? kdbxweb.ProtectedValue.fromString(newValue)
@@ -154,6 +157,30 @@ export class UnlockSessionService {
 			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
 			return text === title;
 		}) ?? null;
+	}
+
+	/**
+	 * Creates an entry (and any intermediate groups) at the given path.
+	 * Sets the Title field to the last path segment.
+	 */
+	private resolveOrCreateEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry {
+		const segments = entryPath.split('/');
+		const title = segments[segments.length - 1]!;
+		const groupSegments = segments.slice(0, -1);
+
+		let group = db.getDefaultGroup();
+		for (const seg of groupSegments) {
+			const existing = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
+			if (existing) {
+				group = existing;
+			} else {
+				group = db.createGroup(group, seg);
+			}
+		}
+
+		const entry = db.createEntry(group);
+		entry.fields.set('Title', title);
+		return entry;
 	}
 
 	private scheduleAutoLock(profileId: string, autoLockMinutes: number): void {

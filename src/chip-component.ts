@@ -142,12 +142,14 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		effect(() => {
 			const isEditing = editing();
 			if (isEditing) {
-				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field));
-				if (value === null || value === undefined) {
+				// Check profile is still unlocked
+				if (!plugin.sessionService?.isUnlocked(profileId)) {
 					editing.set(false);
-					new Notice('Could not read value — is the profile still unlocked?');
+					new Notice('Profile is locked — cannot edit.');
 					return;
 				}
+				// Allow editing even if the entry/field doesn't exist yet (start with empty string)
+				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field)) ?? '';
 				const isMultiline = value.includes('\n') || peek(field).toLowerCase() === 'notes';
 				if (isMultiline) {
 					renderEditingMultiline(value);
@@ -156,11 +158,15 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				}
 			} else {
 				cleanupPopover();
-				// Re-render revealed state after editing ends
-				if (peek(chipState) === 'revealed') {
+				// Re-render after editing ends — transition to revealed if a value now exists
+				const currentState = peek(chipState);
+				if (currentState === 'revealed' || currentState === 'masked-error') {
 					const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field));
 					if (value !== null && value !== undefined) {
+						chipState.set('revealed');
 						renderRevealed(value);
+					} else if (currentState === 'masked-error') {
+						renderMaskedError(peek(errorReason));
 					}
 				}
 			}
@@ -239,6 +245,12 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const labelEl = document.createElement('span');
 		labelEl.textContent = reason;
 
+		const editBtn = makeButton('✏️', 'Create and edit');
+		editBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			editing.set(true);
+		});
+
 		const retryBtn = makeButton('🔄', 'Retry');
 		retryBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
@@ -247,6 +259,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		root.appendChild(iconEl);
 		root.appendChild(labelEl);
+		if (!compact()) root.appendChild(editBtn);
 		root.appendChild(retryBtn);
 	}
 
