@@ -226,15 +226,17 @@ export default class VaultCryptPlugin extends Plugin {
 				matches
 					.map(m => {
 						const identifierString = (m[1] ?? '').toLowerCase();
+						if (identifierString === '') return null;
 						const profileIdEndIndex = identifierString.indexOf("/");
 
 						const profileId = profileIdEndIndex < 0 ? '' : identifierString.substring(0, profileIdEndIndex);
 						if (profileId in settings.profiles) {
 							return profileId;
 						}
-						return '';
+						return null;
 					})
-					.filter(identifierString => !this.sessionService.isUnlocked(identifierString))
+					.filter((profileId): profileId is string => !!profileId)
+					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
 			for (const profileId of lockedProfileIds) {
 				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
@@ -260,13 +262,11 @@ export default class VaultCryptPlugin extends Plugin {
 		this.effects = [
 			effect(() => {
 				const settings = this._settings$();
-				console.debug('[VaultCrypt] Settings changed:', settings);
 				this.refreshAllEditorChips();
 				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
 				this.dispatchSaveSettings();
 			}),
 			effect(() => {
-				console.debug('[VaultCrypt] vaultCryptState changed:', this.vaultCryptState$());
 				const profiles = this.vaultCryptState$().profiles;
 				if (!this.statusBarItem) {
 					return;
@@ -294,8 +294,20 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const loaded = await this.loadData() as Partial<VaultCryptSettings> & { profiles?: unknown };
-		const newSettings: VaultCryptSettings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		const loaded = await this.loadData() as Partial<VaultCryptSettings> | null;
+		const newSettings: VaultCryptSettings = {
+			...structuredClone(DEFAULT_SETTINGS),
+			...loaded,
+			general: {
+				...DEFAULT_SETTINGS.general,
+				...(loaded?.general ?? {}),
+			},
+			security: {
+				...DEFAULT_SETTINGS.security,
+				...(loaded?.security ?? {}),
+			},
+			profiles: (loaded?.profiles ?? structuredClone(DEFAULT_SETTINGS.profiles)),
+		};
 
 		// Migrate old profiles format (string array) to new Record<string, ProfileConfig>
 		if (Array.isArray(newSettings.profiles)) {
@@ -440,16 +452,14 @@ export default class VaultCryptPlugin extends Plugin {
 					navigator.clipboard.writeText('').then(() => {
 						console.debug('[VaultCrypt] Clipboard cleared');
 					}, () => {
+						new Notice('Failed to clear clipboard');
 						console.debug('[VaultCrypt] Failed to clear clipboard');
+
 					});
 				}
 			}).catch(() => {
 				// readText may be denied; best-effort clear
-				navigator.clipboard.writeText('').then(() => {
-					console.debug('[VaultCrypt] Clipboard cleared');
-				}, () => {
-					console.debug('[VaultCrypt] Failed to clear clipboard');
-				});
+				new Notice('Skipping clipboard clear because current contents could not be verified');
 			});
 			this.clearClipboardTimeouts = this.clearClipboardTimeouts.filter(id => id !== timeoutId);
 
