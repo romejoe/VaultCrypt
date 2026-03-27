@@ -327,6 +327,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	// ── Inline editing (single-line) ─────────────────────────────────────────
 
 	function renderEditingInline(value: string) {
+		cleanupPopover();
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
 		root.dataset.vcCopyText = value;
 		root.replaceChildren();
