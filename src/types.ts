@@ -6,6 +6,7 @@ export interface VaultCryptProfile {
 	path: string;
 	kdbxVersion: KdbxVersion;
 	autoLockMinutes: number;
+	managedByKeyring: boolean;
 	isLocked: boolean;
 	lastUnlock: Date | null;
 }
