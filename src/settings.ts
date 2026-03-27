@@ -107,19 +107,34 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.security.autoLockTimeout)
 				.setDynamicTooltip()
 				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.security.autoLockTimeout = value; });
+					this.plugin.patchSettings(s => {
+						s.security.autoLockTimeout = value;
+					});
 				}));
 
 		new Setting(containerEl)
-			.setName('Clipboard clear timer (seconds)')
-			.setDesc('Time in seconds before clearing clipboard after copying a secret')
-			.addSlider(slider => slider
-				.setLimits(1, 60, 1)
-				.setValue(this.plugin.settings.security.clipboardClearSeconds)
-				.setDynamicTooltip()
-				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.security.clipboardClearSeconds = value; });
-				}));
+			.setName('Clipboard clear timer')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('How long after copying before the clipboard is cleared. Set to Disabled to turn off.')
+			.addDropdown(drop => {
+				const allowed = new Set([0, 15, 30, 60, 120]);
+				const current = this.plugin.settings.security.clipboardClearSeconds;
+				const normalized = allowed.has(current) ? current : DEFAULT_SETTINGS.security.clipboardClearSeconds;
+
+				drop
+					.addOption('0', 'Disabled')
+					.addOption('15', '15 seconds')
+					.addOption('30', '30 seconds')
+					.addOption('60', '60 seconds')
+					.addOption('120', '120 seconds')
+					.setValue(String(normalized))
+					.onChange((value) => {
+						const parsed = Number(value);
+						this.plugin.patchSettings(s => {
+							s.security.clipboardClearSeconds = allowed.has(parsed) ? parsed : DEFAULT_SETTINGS.security.clipboardClearSeconds;
+						});
+					});
+			});
 
 		// General section
 		// eslint-disable-next-line obsidianmd/settings-tab/no-problematic-settings-headings
@@ -133,7 +148,9 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.setPlaceholder('.vaultcrypt')
 				.setValue(this.plugin.settings.general.vaultCryptDir)
 				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.general.vaultCryptDir = value; });
+					this.plugin.patchSettings(s => {
+						s.general.vaultCryptDir = value;
+					});
 				}));
 
 		new Setting(containerEl)
@@ -142,7 +159,9 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.general.compactChips)
 				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.general.compactChips = value; });
+					this.plugin.patchSettings(s => {
+						s.general.compactChips = value;
+					});
 				}));
 
 		new Setting(containerEl)
@@ -151,7 +170,9 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.general.autoUnmask)
 				.onChange((value) => {
-					this.plugin.patchSettings(s => { s.general.autoUnmask = value; });
+					this.plugin.patchSettings(s => {
+						s.general.autoUnmask = value;
+					});
 				}));
 
 		new Setting(containerEl)
@@ -165,7 +186,9 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				dropdown
 					.setValue(this.plugin.settings.general.defaultProfile)
 					.onChange((value) => {
-						this.plugin.patchSettings(s => { s.general.defaultProfile = value; });
+						this.plugin.patchSettings(s => {
+							s.general.defaultProfile = value;
+						});
 					});
 			});
 	}
