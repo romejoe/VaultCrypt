@@ -130,3 +130,67 @@ If your plugin does not need CSS, delete this file.
 	cursor: text;
 	user-select: text;
 }
+
+/* ── Inline editing ────────────────────────────────────────────────────────── */
+
+/* Editing state chip */
+.vaultcrypt-chip-editing {
+	background: rgba(var(--color-yellow-rgb), 0.15);
+	color: var(--text-normal);
+}
+
+/* Inline text input inside chip */
+.vaultcrypt-chip-input {
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid var(--text-accent);
+	color: inherit;
+	font-family: var(--font-monospace);
+	font-size: inherit;
+	padding: 0;
+	margin: 0;
+	outline: none;
+	min-width: 4em;
+}
+
+/* Multi-line edit popover */
+.vaultcrypt-edit-popover {
+	position: fixed;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 8px;
+	box-shadow: var(--shadow-s);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 300px;
+	max-width: 500px;
+}
+
+.vaultcrypt-edit-popover textarea {
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	resize: vertical;
+	min-height: 80px;
+	max-height: 300px;
+	padding: 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	outline: none;
+}
+
+.vaultcrypt-edit-popover-buttons {
+	display: flex;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+/* Save confirmation flash on edit button */
+.vaultcrypt-chip-btn-saved {
+	color: var(--color-green) !important;
+	opacity: 1 !important;
+}

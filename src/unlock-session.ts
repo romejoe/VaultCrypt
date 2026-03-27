@@ -2,6 +2,8 @@ import {DataAdapter} from 'obsidian';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 
+const PROTECTED_FIELDS = new Set(['Password']);
+
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
 
@@ -90,28 +92,39 @@ export class UnlockSessionService {
 		const db = this.getDatabase(profileId);
 		if (!db) return null;
 
-		const segments = entryPath.split('/');
-		const title = segments[segments.length - 1];
-		const groupSegments = segments.slice(0, -1);
-
-		// Walk the group hierarchy
-		let group = db.getDefaultGroup();
-		for (const seg of groupSegments) {
-			const child = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
-			if (!child) return null;
-			group = child;
-		}
-
-		const entry = group.entries.find(e => {
-			const t = e.fields.get('Title');
-			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
-			return text === title;
-		});
+		const entry = this.resolveEntry(db, entryPath);
 		if (!entry) return null;
 
 		const fieldVal = entry.fields.get(fieldName);
 		if (fieldVal === undefined) return null;
 		return fieldVal instanceof kdbxweb.ProtectedValue ? fieldVal.getText() : (fieldVal ?? null);
+	}
+
+	/**
+	 * Updates a single field value in an open profile's database and saves to disk.
+	 * Throws if the profile is locked or the entry cannot be found.
+	 */
+	async setFieldValue(
+		profileId: string,
+		entryPath: string,
+		fieldName: string,
+		newValue: string,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) throw new Error(`Entry not found: ${entryPath}`);
+
+		const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
+			? kdbxweb.ProtectedValue.fromString(newValue)
+			: newValue;
+		entry.fields.set(fieldName, fieldValue);
+		entry.times.update();
+
+		const buffer = await db.save();
+		await this.adapter.writeBinary(kdbxFilePath, buffer);
 	}
 
 	/** Register a callback to be called when any profile is locked. */
@@ -122,6 +135,25 @@ export class UnlockSessionService {
 	/** Register a callback to be called when any profile is unlocked. */
 	onUnlock(cb: UnlockCallback): void {
 		this.unlockCallbacks.push(cb);
+	}
+
+	private resolveEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry | null {
+		const segments = entryPath.split('/');
+		const title = segments[segments.length - 1];
+		const groupSegments = segments.slice(0, -1);
+
+		let group = db.getDefaultGroup();
+		for (const seg of groupSegments) {
+			const child = group.groups.find(g => (g.name ?? '').toLowerCase() === seg.toLowerCase());
+			if (!child) return null;
+			group = child;
+		}
+
+		return group.entries.find(e => {
+			const t = e.fields.get('Title');
+			const text = t instanceof kdbxweb.ProtectedValue ? t.getText() : t;
+			return text === title;
+		}) ?? null;
 	}
 
 	private scheduleAutoLock(profileId: string, autoLockMinutes: number): void {
