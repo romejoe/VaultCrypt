@@ -291,7 +291,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 		this.effects = [
 			effect(() => {
-				const settings = this._settings$();
+				this._settings$();
 				this.refreshAllEditorChips();
 				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
 				this.dispatchSaveSettings();

@@ -61,9 +61,6 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		effect(() => {
 			root.title = tooltipPath();
 		}),
-		effect(() =>{
-			console.log("Error message:" + errorReason());
-		}),
 
 		effect(() => {
 			const currentState = chipState();
