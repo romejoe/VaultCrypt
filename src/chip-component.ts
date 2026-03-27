@@ -6,6 +6,12 @@ import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
+/** Editing sub-state: mode + in-progress value, or null when not editing. */
+interface EditState {
+	mode: 'inline' | 'multiline';
+	value: string;
+}
+
 /**
  * Builds an interactive inline chip element for a parsed {{vc:...}} token.
  *
@@ -45,8 +51,14 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	root.dataset.vcChip = '';
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const errorReason = signal<string>('');
-	const editing = signal(false);
 	const justSaved = signal(false);
+
+	/**
+	 * Editing sub-state signal. null = not editing. When non-null, holds the
+	 * current editor mode and the in-progress value so that switching between
+	 * inline ↔ multiline preserves the user's text.
+	 */
+	const editState = signal<EditState | null>(null);
 
 	// Reference to an active multi-line popover for cleanup
 	let activePopover: HTMLElement | null = null;
@@ -74,6 +86,16 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		}
 	})
 
+	/** Enter editing mode — reads the current db value (or empty string) and auto-detects mode. */
+	function startEditing() {
+		if (!plugin.sessionService?.isUnlocked(profileId)) {
+			new Notice('Profile is locked — cannot edit.');
+			return;
+		}
+		const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field)) ?? '';
+		const isMultiline = value.includes('\n') || peek(field).toLowerCase() === 'notes';
+		editState.set({mode: isMultiline ? 'multiline' : 'inline', value});
+	}
 
 	effects = [
 		effect(() => {
@@ -96,8 +118,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 			if (profileLocked) {
 				// Cancel editing if profile locks
-				if (peek(editing)) {
-					editing.set(false);
+				if (peek(editState) !== null) {
+					editState.set(null);
 					cleanupPopover();
 				}
 				chipState.set('locked');
@@ -124,7 +146,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				renderMasked();
 			} else if (currentState === 'revealed') {
 				// Skip re-render if we're in editing mode
-				if (peek(editing)) return;
+				if (peek(editState) !== null) return;
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
 					errorReason.set(`Entry or field not found: ${peek(tooltipPath)}`);
@@ -139,22 +161,14 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			}
 		}),
 
+		// ── Editing effect — watches editState signal ──────────────────────
 		effect(() => {
-			const isEditing = editing();
-			if (isEditing) {
-				// Check profile is still unlocked
-				if (!plugin.sessionService?.isUnlocked(profileId)) {
-					editing.set(false);
-					new Notice('Profile is locked — cannot edit.');
-					return;
-				}
-				// Allow editing even if the entry/field doesn't exist yet (start with empty string)
-				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, peek(field)) ?? '';
-				const isMultiline = value.includes('\n') || peek(field).toLowerCase() === 'notes';
-				if (isMultiline) {
-					renderEditingMultiline(value);
+			const es = editState();
+			if (es !== null) {
+				if (es.mode === 'multiline') {
+					renderEditingMultiline(es.value);
 				} else {
-					renderEditingInline(value);
+					renderEditingInline(es.value);
 				}
 			} else {
 				cleanupPopover();
@@ -248,7 +262,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const editBtn = makeButton('✏️', 'Create and edit');
 		editBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			editing.set(true);
+			startEditing();
 		});
 
 		const retryBtn = makeButton('🔄', 'Retry');
@@ -284,7 +298,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const editBtn = makeButton('✏️', 'Edit');
 		editBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			editing.set(true);
+			startEditing();
 		});
 
 		// Show save confirmation checkmark briefly after a successful save
@@ -323,7 +337,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		iconEl.title = 'Click to mask (cancels edit)';
 		iconEl.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			editing.set(false);
+			editState.set(null);
 			chipState.set('masked');
 		});
 
@@ -335,7 +349,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 		let saving = false;
 
-		input.addEventListener('input', (evt) => {
+		input.addEventListener('input', () => {
 			input.size = Math.max(input.value.length, 8);
 		});
 
@@ -345,22 +359,24 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				evt.preventDefault();
 				saving = true;
 				saveEdit(input.value).then(() => {
-					editing.set(false);
+					editState.set(null);
 				});
 			} else if (evt.key === 'Escape') {
 				evt.preventDefault();
-				editing.set(false);
+				editState.set(null);
 			}
 		});
 
 		input.addEventListener('blur', () => {
 			if (saving) return;
+			// If editState was already cleared (e.g. by Escape) or changed (mode switch), skip
+			if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
 			if (peek(saveOnBlur)) {
 				saveEdit(input.value).then(() => {
-					editing.set(false);
+					editState.set(null);
 				});
 			} else {
-				editing.set(false);
+				editState.set(null);
 			}
 		});
 
@@ -368,8 +384,20 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		input.addEventListener('click', (evt) => evt.stopPropagation());
 		input.addEventListener('mousedown', (evt) => evt.stopPropagation());
 
+		const expandBtn = makeButton('⤢', 'Expand to multi-line');
+		// preventDefault on mousedown stops the input from losing focus before click fires
+		expandBtn.addEventListener('mousedown', (evt) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+		});
+		expandBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			editState.set({mode: 'multiline', value: input.value});
+		});
+
 		root.appendChild(iconEl);
 		root.appendChild(input);
+		root.appendChild(expandBtn);
 
 		requestAnimationFrame(() => {
 			input.focus();
@@ -380,6 +408,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 	// ── Inline editing (multi-line popover) ──────────────────────────────────
 
 	function renderEditingMultiline(value: string) {
+		cleanupPopover();
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
 		root.dataset.vcCopyText = value;
 		root.replaceChildren();
@@ -412,26 +441,41 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		saveBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
 			saveEdit(textarea.value).then(() => {
-				editing.set(false);
+				editState.set(null);
 			});
+		});
+
+		const collapseBtn = document.createElement('button');
+		collapseBtn.textContent = '⤡ Single-line';
+		collapseBtn.title = 'Collapse to single-line input';
+		// Disable when content has multiple lines
+		collapseBtn.disabled = textarea.value.includes('\n');
+		collapseBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			if (collapseBtn.disabled) return;
+			editState.set({mode: 'inline', value: textarea.value});
 		});
 
 		const cancelBtn = document.createElement('button');
 		cancelBtn.textContent = 'Cancel';
 		cancelBtn.addEventListener('click', (evt) => {
 			evt.stopPropagation();
-			editing.set(false);
+			editState.set(null);
+		});
+
+		textarea.addEventListener('input', () => {
+			collapseBtn.disabled = textarea.value.includes('\n');
 		});
 
 		textarea.addEventListener('keydown', (evt) => {
 			evt.stopPropagation();
 			if (evt.key === 'Escape') {
 				evt.preventDefault();
-				editing.set(false);
+				editState.set(null);
 			} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
 				evt.preventDefault();
 				saveEdit(textarea.value).then(() => {
-					editing.set(false);
+					editState.set(null);
 				});
 			}
 		});
@@ -443,10 +487,10 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				document.removeEventListener('mousedown', onClickOutside, true);
 				if (peek(saveOnBlur)) {
 					saveEdit(textarea.value).then(() => {
-						editing.set(false);
+						editState.set(null);
 					});
 				} else {
-					editing.set(false);
+					editState.set(null);
 				}
 			}
 		}
@@ -456,6 +500,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			document.addEventListener('mousedown', onClickOutside, true);
 		});
 
+		btnBar.appendChild(collapseBtn);
 		btnBar.appendChild(cancelBtn);
 		btnBar.appendChild(saveBtn);
 		popover.appendChild(textarea);
@@ -472,7 +517,6 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		activePopover = popover;
 
 		// Store cleanup for the click-outside listener
-		const origCleanup = cleanupPopover;
 		cleanupPopover = function () {
 			document.removeEventListener('mousedown', onClickOutside, true);
 			if (activePopover) {
