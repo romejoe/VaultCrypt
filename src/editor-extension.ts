@@ -85,7 +85,7 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 			update(update: ViewUpdate) {
 				const hasRefreshEffect = update.transactions.some(tr =>
 					tr.effects.some(e => e.is(refreshChipsEffect))
-				) && false;
+				);
 				if (update.docChanged || update.viewportChanged || update.selectionSet || hasRefreshEffect) {
 					this.decorations = buildDecorations(update.view, plugin);
 				}
