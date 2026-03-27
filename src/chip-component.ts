@@ -360,6 +360,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				evt.preventDefault();
 				saving = true;
 				void saveEdit(input.value).then((saved) => {
+					saving = false;
 					if (saved) editState.set(null);
 				});
 			} else if (evt.key === 'Escape') {
