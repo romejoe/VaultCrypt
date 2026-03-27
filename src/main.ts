@@ -3,7 +3,8 @@ import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTa
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
-import {UnlockModal} from './modals';
+import {KeyringService} from './keyring-service';
+import {UnlockModal, KeyringUnlockModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
@@ -77,6 +78,7 @@ export default class VaultCryptPlugin extends Plugin {
 	kdbxService?: KdbxService;
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
+	keyringService!: KeyringService;
 	private editorExtension?: Extension;
 
 	async onload() {
@@ -90,6 +92,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
 		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
+		this.keyringService = new KeyringService(this.app.vault.adapter);
 		this.profileService = new ProfileService(
 			this.settings$,
 			this.app.vault.adapter,
@@ -130,10 +133,20 @@ export default class VaultCryptPlugin extends Plugin {
 			});
 		});
 
-		// Ribbon icon → unlock modal
+		// Ribbon icon → unlock modal (prefers keyring when available)
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		this.addRibbonIcon('lock', 'VaultCrypt', () => {
-			new UnlockModal(this.app, this).open();
+			if (this.shouldUseKeyringUnlock()) {
+				new KeyringUnlockModal(this.app, this, () => {
+					// Chain to per-profile unlock for non-managed locked profiles
+					const remaining = this.vaultCryptState.profiles
+						.filter(p => p.isLocked && !p.managedByKeyring)
+						.map(p => p.id);
+					this.unlockNextLocked(remaining);
+				}).open();
+			} else {
+				new UnlockModal(this.app, this).open();
+			}
 		});
 
 		// Status bar
@@ -181,10 +194,20 @@ export default class VaultCryptPlugin extends Plugin {
 			id: 'vault-crypt-unlock-all',
 			name: 'Unlock all profiles',
 			callback: () => {
-				const lockedIds = this.vaultCryptState.profiles
-					.filter(p => p.isLocked)
-					.map(p => p.id);
-				this.unlockNextLocked(lockedIds);
+				if (this.shouldUseKeyringUnlock()) {
+					new KeyringUnlockModal(this.app, this, () => {
+						// Chain to per-profile unlock for non-managed locked profiles
+						const remaining = this.vaultCryptState.profiles
+							.filter(p => p.isLocked && !p.managedByKeyring)
+							.map(p => p.id);
+						this.unlockNextLocked(remaining);
+					}).open();
+				} else {
+					const lockedIds = this.vaultCryptState.profiles
+						.filter(p => p.isLocked)
+						.map(p => p.id);
+					this.unlockNextLocked(lockedIds);
+				}
 			}
 		});
 
@@ -285,7 +308,22 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter((profileId): profileId is string => !!profileId)
 					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
+			// Check if any locked profiles are keyring-managed
+			const hasLockedManagedProfiles = [...lockedProfileIds].some(
+				id => settings.profiles[id]?.managedByKeyring
+			);
+
+			if (hasLockedManagedProfiles && settings.keyringEnabled) {
+				const notice = new Notice('Locked profiles detected. ', 5_000);
+				const btn = notice.messageEl.createEl('button', {text: 'Unlock with keyring'});
+				btn.addEventListener('click', () => {
+					notice.hide();
+					new KeyringUnlockModal(this.app, this).open();
+				});
+			}
+
 			for (const profileId of lockedProfileIds) {
+				if (settings.profiles[profileId]?.managedByKeyring && settings.keyringEnabled) continue;
 				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
 				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
 				btn.addEventListener('click', () => {
@@ -382,6 +420,18 @@ export default class VaultCryptPlugin extends Plugin {
 			}
 		}
 
+		// Migrate: ensure keyringEnabled exists
+		if (newSettings.keyringEnabled === undefined) {
+			newSettings.keyringEnabled = false;
+		}
+
+		// Migrate: ensure managedByKeyring exists on all profiles
+		for (const config of Object.values(newSettings.profiles)) {
+			if ((config as ProfileConfig & {managedByKeyring?: boolean}).managedByKeyring === undefined) {
+				config.managedByKeyring = false;
+			}
+		}
+
 		// Migrate old clipboardClearTimer to clipboardClearSeconds
 		const security = newSettings.security as VaultCryptSettings['security'] & { clipboardClearTimer?: number };
 		if (security.clipboardClearTimer !== undefined && security.clipboardClearSeconds === DEFAULT_SETTINGS.security.clipboardClearSeconds) {
@@ -435,6 +485,7 @@ export default class VaultCryptPlugin extends Plugin {
 					path: cfg.path,
 					kdbxVersion: cfg.kdbxVersion,
 					autoLockMinutes: cfg.autoLockMinutes,
+					managedByKeyring: cfg.managedByKeyring,
 					isLocked: existing ? existing.isLocked : !this.sessionService.isUnlocked(id),
 					lastUnlock: existing?.lastUnlock ?? null,
 				};
@@ -449,6 +500,12 @@ export default class VaultCryptPlugin extends Plugin {
 			}
 		})
 
+	}
+
+	/** Returns true if the keyring is enabled and at least one managed profile is locked. */
+	private shouldUseKeyringUnlock(): boolean {
+		if (!this.settings.keyringEnabled) return false;
+		return this.vaultCryptState.profiles.some(p => p.managedByKeyring && p.isLocked);
 	}
 
 	/** Updates the isLocked flag and lastUnlock date for a profile in runtime state. */

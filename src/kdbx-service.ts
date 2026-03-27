@@ -112,6 +112,14 @@ export class KdbxService {
 		this.currentPath = null;
 	}
 
+	/** Changes the master password (credentials) of the currently open database. */
+	changePassword(newPassword: string): void {
+		if (!this.db) throw new Error('No database is open');
+		this.db.credentials = new kdbxweb.KdbxCredentials(
+			kdbxweb.ProtectedValue.fromString(newPassword)
+		);
+	}
+
 	getEntry(entryPath: string): EntryRecord | null {
 		if (!this.db) throw new Error('No database is open');
 		const entry = this.resolveEntry(entryPath);

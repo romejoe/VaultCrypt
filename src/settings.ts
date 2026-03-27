@@ -1,18 +1,24 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
 import VaultCryptPlugin from "./main";
 import {KdbxVersion} from "./kdbx-service";
-import {AddProfileModal, EditProfileModal, RenameProfileModal, DeleteProfileModal} from "./modals";
+import {
+	AddProfileModal, EditProfileModal, RenameProfileModal, DeleteProfileModal,
+	SetupKeyringModal, AddToKeyringModal, RemoveFromKeyringModal,
+	ChangeKeyringPasswordModal, DeleteKeyringModal,
+} from "./modals";
 
 export interface ProfileConfig {
 	path: string;
 	kdbxVersion: KdbxVersion;
 	autoLockMinutes: number;
 	defaultField: string;
+	managedByKeyring: boolean;
 }
 
 export interface VaultCryptSettings {
 	profiles: Record<string, ProfileConfig>;
 	masterKeyringPath: string;
+	keyringEnabled: boolean;
 	security: {
 		autoLockTimeout: number;
 		clipboardClearSeconds: number;
@@ -29,6 +35,7 @@ export interface VaultCryptSettings {
 export const DEFAULT_SETTINGS: VaultCryptSettings = {
 	profiles: {},
 	masterKeyringPath: ".vaultcrypt/_keyring.kdbx",
+	keyringEnabled: false,
 	security: {
 		autoLockTimeout: 300,
 		clipboardClearSeconds: 30
@@ -82,9 +89,12 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		} else {
 			for (const name of profileNames) {
 				const config = profiles[name]!;
-				new Setting(containerEl)
+				const desc = config.managedByKeyring
+					? `${config.path}  •  KDBX v${config.kdbxVersion}  •  keyring`
+					: `${config.path}  •  KDBX v${config.kdbxVersion}`;
+				const setting = new Setting(containerEl)
 					.setName(name)
-					.setDesc(`${config.path}  •  KDBX v${config.kdbxVersion}`)
+					.setDesc(desc)
 					.addButton(btn => btn
 						.setButtonText("Edit")
 						.onClick(() => new EditProfileModal(this.app, name, config, this.plugin, () => this.display()).open()))
@@ -95,7 +105,42 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 						.setButtonText("Delete")
 						.setWarning()
 						.onClick(() => new DeleteProfileModal(this.app, name, config, this.plugin, () => this.display()).open()));
+
+				if (config.managedByKeyring) {
+					setting.addButton(btn => btn
+						.setButtonText("Remove from keyring")
+						.onClick(() => new RemoveFromKeyringModal(this.app, this.plugin, name, () => this.display()).open()));
+				}
 			}
+		}
+
+		// Keyring section
+		new Setting(containerEl).setName("Keyring").setHeading();
+
+		if (!this.plugin.settings.keyringEnabled) {
+			new Setting(containerEl)
+				.setName("Set up a keyring")
+				.setDesc("A keyring encrypts all your profile passwords under a single master password, so one unlock opens everything.")
+				.addButton(btn => btn
+					.setButtonText("Set up keyring")
+					.setCta()
+					.onClick(() => new SetupKeyringModal(this.app, this.plugin, () => this.display()).open()));
+		} else {
+			new Setting(containerEl)
+				.setName("Keyring active")
+				.setDesc(`Keyring file: ${this.plugin.settings.masterKeyringPath}`);
+
+			new Setting(containerEl)
+				.addButton(btn => btn
+					.setButtonText("Add profile to keyring")
+					.onClick(() => new AddToKeyringModal(this.app, this.plugin, () => this.display()).open()))
+				.addButton(btn => btn
+					.setButtonText("Change master password")
+					.onClick(() => new ChangeKeyringPasswordModal(this.app, this.plugin, () => this.display()).open()))
+				.addButton(btn => btn
+					.setButtonText("Delete keyring")
+					.setWarning()
+					.onClick(() => new DeleteKeyringModal(this.app, this.plugin, () => this.display()).open()));
 		}
 
 		// Security section

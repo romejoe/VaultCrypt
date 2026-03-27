@@ -43,6 +43,7 @@ export class ProfileService {
 		const configData = {
 			profiles: settings.profiles,
 			masterKeyringPath: settings.masterKeyringPath,
+			keyringEnabled: settings.keyringEnabled,
 			clipboardClearSeconds: settings.security.clipboardClearSeconds,
 		};
 		await this.adapter.write(configPath, JSON.stringify(configData, null, 2));
@@ -61,6 +62,7 @@ export class ProfileService {
 				kdbxVersion: version,
 				autoLockMinutes: 0,
 				defaultField: 'password',
+				managedByKeyring: false,
 			}
 		});
 		await this.writeConfigFile();
