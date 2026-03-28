@@ -545,6 +545,19 @@ export default class VaultCryptPlugin extends Plugin {
 	// ── UI helpers ────────────────────────────────────────────────────────────
 
 	/**
+	 * Refreshes all chip decorations in both CM6 live-preview editors and
+	 * reading-mode post-processed views.  Call after mutating KDBX data.
+	 */
+	public refreshChips(): void {
+		this.refreshAllEditorChips();
+		this.app.workspace.iterateAllLeaves(leaf => {
+			if (leaf.view instanceof MarkdownView) {
+				leaf.view.previewMode.rerender(true);
+			}
+		});
+	}
+
+	/**
 	 * Dispatches `refreshChipsEffect` to all open CodeMirror editor views so
 	 * that chip decorations are rebuilt immediately after a lock/unlock event.
 	 */

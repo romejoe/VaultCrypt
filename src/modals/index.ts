@@ -5,3 +5,6 @@ export {
 	RemoveFromKeyringModal, ChangeKeyringPasswordModal, DeleteKeyringModal,
 } from './keyring-modals';
 export {InsertSecretModal} from './insert-secret-modal';
+export {EditSecretModal} from './edit-secret-modal';
+export {DeleteSecretModal} from './delete-secret-modal';
+export {GeneratePasswordModal} from './generate-password-modal';
