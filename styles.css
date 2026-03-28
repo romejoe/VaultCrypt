@@ -12,6 +12,10 @@ If your plugin does not need CSS, delete this file.
 	display: none;
 }
 
+.vaultcrypt-flex {
+	display: flex;
+}
+
 /* Source mode: subtle background highlight on raw {{vc:...}} token */
 .vaultcrypt-token {
 	background-color: rgba(var(--color-accent-rgb), 0.12);
@@ -306,15 +310,18 @@ If your plugin does not need CSS, delete this file.
 }
 
 /* Locked-profile warning row */
-.vaultcrypt-insert-locked {
-	display: flex;
+.vaultcrypt-insert-locked-warning {
 	align-items: center;
 	gap: 8px;
 	padding: 4px var(--size-4-3);
 	margin: 4px 0;
 }
 
-.vaultcrypt-insert-locked > p {
+.vaultcrypt-insert-locked-warning > p {
 	margin: 0;
 	flex: 1;
+}
+
+.vaultcrypt-insert-locked-warning-show {
+	display: flex;
 }
