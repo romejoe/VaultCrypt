@@ -156,7 +156,19 @@ export class AddProfileModal extends Modal {
 				);
 			}
 
-			await this.plugin.addProfile(this.name, this.password, this.version);
+			try {
+				await this.plugin.addProfile(this.name, this.password, this.version);
+			} catch (err) {
+				// Roll back keyring entry if profile creation failed
+				if (this.addToKeyring) {
+					await this.plugin.keyringService.removeProfilePassword(
+						this.plugin.settings.masterKeyringPath,
+						this.keyringPassword,
+						this.name.toLowerCase(),
+					).catch(e => console.error('[VaultCrypt] Failed to roll back keyring entry', e));
+				}
+				throw err;
+			}
 
 			// Mark as managed now that both the keyring write and profile creation succeeded
 			if (this.addToKeyring) {
@@ -228,7 +240,7 @@ export class EditProfileModal extends Modal {
 			.addText(text => text
 				.setValue(this.defaultField)
 				.onChange(value => {
-					this.defaultField = value;
+					this.defaultField = value.trim() || 'Password';
 				}));
 
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});

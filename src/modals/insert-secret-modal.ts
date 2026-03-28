@@ -7,6 +7,11 @@ import {DeepReadonly} from "../utils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Characters allowed in a single path segment (group name or entry title) per inline-parser. */
+const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+/** Characters allowed in a field name per inline-parser. */
+const VALID_FIELD_NAME = /^[a-zA-Z0-9_-]+$/;
+
 function generatePassword(
 	length = 20,
 	opts: { upper: boolean; lower: boolean; digits: boolean; symbols: boolean } = {
@@ -18,7 +23,7 @@ function generatePassword(
 	if (opts.lower) charset += 'abcdefghijklmnopqrstuvwxyz';
 	if (opts.digits) charset += '0123456789';
 	if (opts.symbols) charset += '!@#$%^&*()-_=+[]{}|;:,.<>?';
-	if (!charset) charset = 'abcdefghijklmnopqrstuvwxyz';
+	if (!charset) throw new Error('Enable at least one character set');
 
 	const result: string[] = [];
 	const max = Math.floor(0xffffffff / charset.length) * charset.length;
@@ -41,6 +46,8 @@ class GeneratePasswordModal extends Modal {
 	private opts = {upper: true, lower: true, digits: true, symbols: true};
 	private currentPassword: string;
 	private previewEl!: HTMLElement;
+	private errorEl!: HTMLElement;
+	private applyBtn!: ButtonComponent;
 
 	constructor(app: App, onApply: (pw: string) => void) {
 		super(app);
@@ -102,18 +109,33 @@ class GeneratePasswordModal extends Modal {
 			.setTooltip('Regenerate')
 			.onClick(() => this.refreshPreview()));
 
+		this.errorEl = contentEl.createEl('p', {cls: 'mod-warning vaultcrypt-hidden'});
+
 		new Setting(contentEl)
 			.addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()))
-			.addButton(btn => btn
-				.setButtonText('Apply')
-				.setCta()
-				.onClick(() => {
-					this.onApply(this.currentPassword);
-					this.close();
-				}));
+			.addButton(btn => {
+				this.applyBtn = btn;
+				btn.setButtonText('Apply')
+					.setCta()
+					.onClick(() => {
+						this.onApply(this.currentPassword);
+						this.close();
+					});
+			});
 	}
 
 	private refreshPreview() {
+		const hasCharset = this.opts.upper || this.opts.lower || this.opts.digits || this.opts.symbols;
+		if (!hasCharset) {
+			this.currentPassword = '';
+			this.previewEl?.setText('');
+			this.errorEl.textContent = 'Enable at least one character set';
+			this.errorEl.removeClass('vaultcrypt-hidden');
+			this.applyBtn?.setDisabled(true);
+			return;
+		}
+		this.errorEl.addClass('vaultcrypt-hidden');
+		this.applyBtn?.setDisabled(false);
 		this.currentPassword = generatePassword(this.length, this.opts);
 		this.previewEl?.setText(this.currentPassword);
 	}
@@ -320,6 +342,7 @@ export class InsertSecretModal extends Modal {
 		const tree = this.augmentTreeWithVirtualGroups(rawTree);
 		const ul = this.buildGroupUl(tree);
 		ul.addClass('vaultcrypt-tree-root');
+		ul.setAttribute('role', 'tree');
 		this.treeContainerEl.appendChild(ul);
 	}
 
@@ -352,42 +375,68 @@ export class InsertSecretModal extends Modal {
 	private buildGroupUl(node: DbTreeNode): HTMLUListElement {
 		const ul = document.createElement('ul');
 		ul.addClass('vaultcrypt-tree-ul');
+		ul.setAttribute('role', 'group');
 
 		for (const childGroup of node.groups) {
 			const li = ul.createEl('li');
+			li.setAttribute('role', 'treeitem');
 			const isExpanded = this.expandedPaths.has(childGroup.path);
 			const caretCls = 'vaultcrypt-tree-caret' + (isExpanded ? ' vaultcrypt-tree-caret-open' : '');
 			const caret = li.createEl('span', {cls: caretCls, text: childGroup.name || '(unnamed)'});
+			caret.tabIndex = 0;
+			caret.setAttribute('role', 'button');
+			caret.setAttribute('aria-expanded', String(isExpanded));
 			const nestedCls = 'vaultcrypt-tree-ul vaultcrypt-tree-nested' + (isExpanded ? ' vaultcrypt-tree-active' : '');
 			const nested = li.createEl('ul', {cls: nestedCls});
+			nested.setAttribute('role', 'group');
 
 			const childUl = this.buildGroupUl(childGroup);
 			for (const child of Array.from(childUl.children)) {
 				nested.appendChild(child);
 			}
 
-			caret.addEventListener('click', (e) => {
+			const toggleCaret = (e: Event) => {
 				e.stopPropagation();
 				const nowOpen = caret.classList.toggle('vaultcrypt-tree-caret-open');
 				nested.classList.toggle('vaultcrypt-tree-active', nowOpen);
+				caret.setAttribute('aria-expanded', String(nowOpen));
 				if (nowOpen) this.expandedPaths.add(childGroup.path);
 				else this.expandedPaths.delete(childGroup.path);
+			};
+			caret.addEventListener('click', toggleCaret);
+			caret.addEventListener('keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCaret(e); }
 			});
 			li.appendChild(nested);
 		}
 
 		for (const entry of node.entries) {
 			const li = ul.createEl('li', {cls: 'vaultcrypt-tree-entry', text: entry.name || '(untitled)'});
+			li.tabIndex = 0;
+			li.setAttribute('role', 'treeitem');
 			li.addEventListener('click', () => this.selectEntry(entry.path, li));
+			li.addEventListener('keydown', (e: KeyboardEvent) => {
+				if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.selectEntry(entry.path, li); }
+			});
 		}
 
 		const newEntryLi = ul.createEl('li', {cls: 'vaultcrypt-tree-new-entry', text: 'New entry here'});
+		newEntryLi.tabIndex = 0;
+		newEntryLi.setAttribute('role', 'button');
 		newEntryLi.addEventListener('click', () => this.selectNewEntry(node.path, newEntryLi));
+		newEntryLi.addEventListener('keydown', (e: KeyboardEvent) => {
+			if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.selectNewEntry(node.path, newEntryLi); }
+		});
 
 		const newGroupLi = ul.createEl('li', {cls: 'vaultcrypt-tree-new-entry', text: 'New group here'});
+		newGroupLi.tabIndex = 0;
+		newGroupLi.setAttribute('role', 'button');
 		newGroupLi.addEventListener('click', (e) => {
 			e.stopPropagation();
 			this.startInlineGroupCreate(newGroupLi, node.path);
+		});
+		newGroupLi.addEventListener('keydown', (e: KeyboardEvent) => {
+			if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.startInlineGroupCreate(newGroupLi, node.path); }
 		});
 
 		return ul;
@@ -406,7 +455,8 @@ export class InsertSecretModal extends Modal {
 		};
 		const confirm = () => {
 			const name = input.value.trim();
-			if (name) this.addVirtualGroup(parentPath, name);
+			if (name && VALID_PATH_SEGMENT.test(name)) this.addVirtualGroup(parentPath, name);
+			else if (name) { new Notice('Group name can only contain letters, digits, hyphens, and underscores'); restore(); }
 			else restore();
 		};
 		input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -459,9 +509,8 @@ export class InsertSecretModal extends Modal {
 				.setPlaceholder('Enter entry name')
 				.onChange(value => {
 					this.entryName = value;
-					const hasSlash = value.includes('/');
-					if (hasSlash) {
-						this.entryNameErrorEl.textContent = 'Entry name cannot contain "/"';
+					if (value && !VALID_PATH_SEGMENT.test(value)) {
+						this.entryNameErrorEl.textContent = 'Entry name can only contain letters, digits, hyphens, and underscores';
 						this.entryNameErrorEl.removeClass('vaultcrypt-hidden');
 					} else {
 						this.entryNameErrorEl.addClass('vaultcrypt-hidden');
@@ -553,6 +602,7 @@ export class InsertSecretModal extends Modal {
 					.setValue(field.value)
 					.onChange(v => {
 						field.value = v;
+						this.refreshFieldDropdown();
 					}))
 				.addButton(btn => btn
 					.setButtonText('×')
@@ -601,7 +651,7 @@ export class InsertSecretModal extends Modal {
 			if (this.fieldUserName) options.push('UserName');
 			if (this.fieldURL) options.push('URL');
 			for (const cf of this.customFields) {
-				if (cf.key && !options.includes(cf.key)) options.push(cf.key);
+				if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
 			}
 		}
 
@@ -660,6 +710,7 @@ export class InsertSecretModal extends Modal {
 		const seen = new Set<string>();
 		for (const cf of this.customFields) {
 			if (!cf.key) return 'Custom field key cannot be empty';
+			if (!VALID_FIELD_NAME.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, and underscores`;
 			if (reserved.has(cf.key)) return `"${cf.key}" is a reserved field name`;
 			if (seen.has(cf.key)) return `Duplicate custom field key: "${cf.key}"`;
 			seen.add(cf.key);
@@ -669,9 +720,10 @@ export class InsertSecretModal extends Modal {
 
 	private updateInsertButtonState() {
 		const hasSelection = this.selectedEntryPath !== null || this.newEntryGroupPath !== null;
-		const entryNameOk = this.newEntryGroupPath === null || (!!this.entryName && !this.entryName.includes('/'));
+		const entryNameOk = this.newEntryGroupPath === null || (!!this.entryName && VALID_PATH_SEGMENT.test(this.entryName));
 		const customFieldsOk = this.newEntryGroupPath === null || this.validateCustomFields() === null;
-		this.insertBtn?.setDisabled(!hasSelection || !entryNameOk || !customFieldsOk);
+		const hasReferenceField = !!this.referenceField;
+		this.insertBtn?.setDisabled(!hasSelection || !entryNameOk || !customFieldsOk || !hasReferenceField);
 	}
 
 	private showError(msg: string) {
@@ -697,8 +749,8 @@ export class InsertSecretModal extends Modal {
 					this.showError('Entry name is required.');
 					return;
 				}
-				if (this.entryName.includes('/')) {
-					this.showError('Entry name cannot contain "/".');
+				if (!VALID_PATH_SEGMENT.test(this.entryName)) {
+					this.showError('Entry name can only contain letters, digits, hyphens, and underscores.');
 					return;
 				}
 				const cfError = this.validateCustomFields();

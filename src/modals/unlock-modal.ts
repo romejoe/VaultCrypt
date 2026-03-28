@@ -25,10 +25,9 @@ export class UnlockModal extends Modal {
 			id => !plugin.sessionService.isUnlocked(id)
 		);
 		this.selectedProfileId =
-			preselectedProfileId ??
-			lockedIds[0] ??
-			Object.keys(profiles)[0] ??
-			"";
+			(preselectedProfileId && lockedIds.includes(preselectedProfileId))
+				? preselectedProfileId
+				: lockedIds[0] ?? "";
 	}
 
 	onOpen() {
@@ -39,6 +38,13 @@ export class UnlockModal extends Modal {
 		const lockedIds = Object.keys(profiles).filter(
 			id => !this.plugin.sessionService.isUnlocked(id)
 		);
+
+		if (lockedIds.length === 0) {
+			contentEl.createEl("p", {text: "All profiles are already unlocked."});
+			new Setting(contentEl)
+				.addButton(btn => btn.setButtonText("Close").setCta().onClick(() => this.close()));
+			return;
+		}
 
 		new Setting(contentEl)
 			.setName("Profile")

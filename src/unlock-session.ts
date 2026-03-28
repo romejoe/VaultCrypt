@@ -4,6 +4,9 @@ import {ProfileConfig} from './settings';
 
 const PROTECTED_FIELDS = new Set(['Password']);
 
+/** Characters allowed in a single path segment (group or entry name) for inline-token parsing. */
+const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
 
@@ -273,17 +276,23 @@ export class UnlockSessionService {
 	}
 
 	private buildTreeNode(group: kdbxweb.KdbxGroup, groupPath: string): DbTreeNode {
-		const childGroups: DbTreeNode[] = group.groups.map(g => {
+		const childGroups: DbTreeNode[] = [];
+		for (const g of group.groups) {
 			const childName = g.name ?? '';
+			// Skip groups whose names can't be represented in token syntax
+			if (!childName || !VALID_PATH_SEGMENT.test(childName)) continue;
 			const childPath = groupPath ? `${groupPath}/${childName}` : childName;
-			return this.buildTreeNode(g, childPath);
-		});
-		const entries: DbTreeEntry[] = group.entries.map(e => {
+			childGroups.push(this.buildTreeNode(g, childPath));
+		}
+		const entries: DbTreeEntry[] = [];
+		for (const e of group.entries) {
 			const titleVal = e.fields.get('Title');
 			const title = titleVal instanceof kdbxweb.ProtectedValue ? titleVal.getText() : (titleVal ?? '');
+			// Skip entries whose titles can't be represented in token syntax
+			if (!title || !VALID_PATH_SEGMENT.test(title)) continue;
 			const entryPath = groupPath ? `${groupPath}/${title}` : title;
-			return { name: title, path: entryPath };
-		});
+			entries.push({ name: title, path: entryPath });
+		}
 		return { name: group.name ?? '', path: groupPath, groups: childGroups, entries };
 	}
 
