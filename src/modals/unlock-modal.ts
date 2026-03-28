@@ -8,6 +8,7 @@ export class UnlockModal extends Modal {
 	private useKeyring = false;
 	private keyringToggleSetting: Setting | null = null;
 	private passwordSetting!: Setting;
+	private passwordInputEl!: HTMLInputElement;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
@@ -72,6 +73,7 @@ export class UnlockModal extends Modal {
 					toggle.setValue(this.useKeyring)
 						.onChange((value: boolean) => {
 							this.useKeyring = value;
+							this.clearPassword();
 							this.updatePasswordLabel();
 						});
 				});
@@ -82,6 +84,7 @@ export class UnlockModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
+				this.passwordInputEl = text.inputEl;
 				text.setPlaceholder("Enter password")
 					.onChange(value => {
 						this.password = value;
@@ -122,12 +125,18 @@ export class UnlockModal extends Modal {
 		if (!isManaged && this.useKeyring) {
 			this.useKeyring = false;
 			(this.keyringToggleSetting.components[0] as ToggleComponent).setValue(false);
+			this.clearPassword();
 		}
 		this.updatePasswordLabel();
 	}
 
 	private updatePasswordLabel() {
 		this.passwordSetting.setName(this.useKeyring ? "Keyring master password" : "Profile password");
+	}
+
+	private clearPassword() {
+		this.password = "";
+		this.passwordInputEl.value = "";
 	}
 
 	private showError(msg: string) {
@@ -146,7 +155,13 @@ export class UnlockModal extends Modal {
 			return;
 		}
 
-		const config = this.plugin.settings.profiles[this.selectedProfileId];
+		// Snapshot mutable form state before any await to prevent race conditions
+		// if the user changes the dropdown or toggle while the async flow is in flight.
+		const profileId = this.selectedProfileId;
+		const submittedPassword = this.password;
+		const useKeyring = this.useKeyring;
+
+		const config = this.plugin.settings.profiles[profileId];
 		if (!config) {
 			this.showError("Profile not found.");
 			return;
@@ -155,36 +170,36 @@ export class UnlockModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			if (this.useKeyring) {
+			if (useKeyring) {
 				let passwords: Map<string, string>;
 				try {
 					passwords = await this.plugin.keyringService.getProfilePasswords(
 						this.plugin.settings.masterKeyringPath,
-						this.password,
-						[this.selectedProfileId],
+						submittedPassword,
+						[profileId],
 					);
 				} catch (e) {
 					console.error(e);
 					this.showError("Incorrect keyring master password or corrupted keyring.");
 					return;
 				}
-				const profilePassword = passwords.get(this.selectedProfileId);
+				const profilePassword = passwords.get(profileId);
 				if (!profilePassword) {
 					this.showError("Profile not found in keyring.");
 					return;
 				}
 				try {
-					await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, profilePassword);
+					await this.plugin.sessionService.unlockProfile(profileId, config, profilePassword);
 				} catch (e) {
 					console.error(e);
 					this.showError("Stored profile password is incorrect or corrupted.");
 					return;
 				}
 			} else {
-				await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, this.password);
+				await this.plugin.sessionService.unlockProfile(profileId, config, submittedPassword);
 			}
 			this.close();
-			this.onDone?.(this.selectedProfileId);
+			this.onDone?.(profileId);
 		} catch (e) {
 			console.error(e);
 			this.showError("Incorrect password or corrupted database.");
