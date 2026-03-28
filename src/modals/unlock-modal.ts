@@ -156,17 +156,30 @@ export class UnlockModal extends Modal {
 		this.submitBtn.setDisabled(true);
 		try {
 			if (this.useKeyring) {
-				const passwords = await this.plugin.keyringService.getProfilePasswords(
-					this.plugin.settings.masterKeyringPath,
-					this.password,
-					[this.selectedProfileId],
-				);
+				let passwords: Map<string, string>;
+				try {
+					passwords = await this.plugin.keyringService.getProfilePasswords(
+						this.plugin.settings.masterKeyringPath,
+						this.password,
+						[this.selectedProfileId],
+					);
+				} catch (e) {
+					console.error(e);
+					this.showError("Incorrect keyring master password or corrupted keyring.");
+					return;
+				}
 				const profilePassword = passwords.get(this.selectedProfileId);
 				if (!profilePassword) {
 					this.showError("Profile not found in keyring.");
 					return;
 				}
-				await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, profilePassword);
+				try {
+					await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, profilePassword);
+				} catch (e) {
+					console.error(e);
+					this.showError("Stored profile password is incorrect or corrupted.");
+					return;
+				}
 			} else {
 				await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, this.password);
 			}
@@ -174,10 +187,7 @@ export class UnlockModal extends Modal {
 			this.onDone?.(this.selectedProfileId);
 		} catch (e) {
 			console.error(e);
-			this.showError(this.useKeyring
-				? "Incorrect keyring password or corrupted keyring."
-				: "Incorrect password or corrupted database."
-			);
+			this.showError("Incorrect password or corrupted database.");
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
