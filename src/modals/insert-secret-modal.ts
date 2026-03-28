@@ -212,7 +212,7 @@ export class InsertSecretModal extends Modal {
 			return state.profiles.find(p => p.id === selectedProfileId) ?? null;
 		});
 
-		this.selectedProfileLocked$ = computed(() =>{
+		this.selectedProfileLocked$ = computed(() => {
 			const profile = this.selectedProfile$();
 			return profile?.isLocked ?? true;
 		})
@@ -286,7 +286,7 @@ export class InsertSecretModal extends Modal {
 			// Locked status changed
 			effect(() => {
 				const isLocked = this.selectedProfileLocked$();
-				if (!this.isOpen){
+				if (!this.isOpen) {
 					return;
 				}
 				this.onLockStateChanged(isLocked);
@@ -423,7 +423,10 @@ export class InsertSecretModal extends Modal {
 			};
 			caret.addEventListener('click', toggleCaret);
 			caret.addEventListener('keydown', (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCaret(e); }
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					toggleCaret(e);
+				}
 			});
 			li.appendChild(nested);
 		}
@@ -434,7 +437,10 @@ export class InsertSecretModal extends Modal {
 			li.setAttribute('role', 'treeitem');
 			li.addEventListener('click', () => this.selectEntry(entry.path, li));
 			li.addEventListener('keydown', (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.selectEntry(entry.path, li); }
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					this.selectEntry(entry.path, li);
+				}
 			});
 		}
 
@@ -443,7 +449,10 @@ export class InsertSecretModal extends Modal {
 		newEntryLi.setAttribute('role', 'button');
 		newEntryLi.addEventListener('click', () => this.selectNewEntry(node.path, newEntryLi));
 		newEntryLi.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.selectNewEntry(node.path, newEntryLi); }
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				this.selectNewEntry(node.path, newEntryLi);
+			}
 		});
 
 		const newGroupLi = ul.createEl('li', {cls: 'vaultcrypt-tree-new-entry', text: 'New group here'});
@@ -454,7 +463,11 @@ export class InsertSecretModal extends Modal {
 			this.startInlineGroupCreate(newGroupLi, node.path);
 		});
 		newGroupLi.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.startInlineGroupCreate(newGroupLi, node.path); }
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				e.stopPropagation();
+				this.startInlineGroupCreate(newGroupLi, node.path);
+			}
 		});
 
 		return ul;
@@ -474,12 +487,20 @@ export class InsertSecretModal extends Modal {
 		const confirm = () => {
 			const name = input.value.trim();
 			if (name && VALID_PATH_SEGMENT.test(name)) this.addVirtualGroup(parentPath, name);
-			else if (name) { new Notice('Group name can only contain letters, digits, hyphens, and underscores'); restore(); }
-			else restore();
+			else if (name) {
+				new Notice('Group name can only contain letters, digits, hyphens, and underscores');
+				restore();
+			} else restore();
 		};
 		input.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter') { e.stopPropagation(); confirm(); }
-			if (e.key === 'Escape') { e.stopPropagation(); restore(); }
+			if (e.key === 'Enter') {
+				e.stopPropagation();
+				confirm();
+			}
+			if (e.key === 'Escape') {
+				e.stopPropagation();
+				restore();
+			}
 		});
 		// defer blur so Enter/Escape fire first
 		input.addEventListener('blur', () => window.setTimeout(confirm, 100));
@@ -668,7 +689,8 @@ export class InsertSecretModal extends Modal {
 			if (names) {
 				for (const name of names) {
 					if (name === 'Title') continue;
-					// Only offer fields that have a non-empty value
+					// Skip fields whose names can't be represented in token syntax
+					if (!VALID_FIELD_NAME.test(name)) continue;
 					const val = this.plugin.sessionService.getFieldValue(profileId, this.selectedEntryPath, name);
 					if (val) options.push(name);
 				}
