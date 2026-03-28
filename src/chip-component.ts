@@ -1,5 +1,5 @@
-import {Notice} from 'obsidian';
-import {UnlockModal} from './modals';
+import {Menu, Notice, Platform} from 'obsidian';
+import {UnlockModal, EditSecretModal, DeleteSecretModal} from './modals';
 import {ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -85,6 +85,72 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			effect?.();
 		}
 	})
+
+	// ── Context menu (right-click) ──────────────────────────────────────────
+	root.addEventListener('contextmenu', (evt) => {
+		evt.preventDefault();
+		evt.stopPropagation();
+
+		const menu = new Menu();
+		const unlocked = plugin.sessionService?.isUnlocked(profileId);
+
+		if (unlocked) {
+			menu.addItem(item => item
+				.setTitle('Edit entry')
+				.setIcon('pencil')
+				.onClick(() => {
+					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
+				}));
+
+			menu.addItem(item => item
+				.setTitle('Delete entry')
+				.setIcon('trash-2')
+				.onClick(() => {
+					new DeleteSecretModal(plugin.app, plugin, profileId, token.entryPath).open();
+				}));
+
+			menu.addSeparator();
+		}
+
+		menu.addItem(item => item
+			.setTitle('Copy reference')
+			.setIcon('copy')
+			.onClick(() => {
+				navigator.clipboard.writeText(token.raw).then(
+					() => new Notice('Reference copied to clipboard'),
+					() => new Notice('Failed to copy reference'),
+				);
+			}));
+
+		if (Platform.isDesktop) {
+			menu.addItem(item => item
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+				.setTitle('Open in KeePassXC')
+				.setIcon('external-link')
+				.onClick(() => {
+					const config = peek(profileConfig);
+					if (!config) {
+						new Notice('Profile configuration not found');
+						return;
+					}
+					try {
+						// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-call
+						const shell = (window as any).require?.('electron')?.shell;
+						const adapter = plugin.app.vault.adapter as { getFullPath?: (path: string) => string };
+						if (shell && adapter.getFullPath) {
+							// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
+							shell.openPath(adapter.getFullPath(config.path));
+						} else {
+							new Notice('Cannot determine full file path');
+						}
+					} catch {
+						new Notice('Failed to open file');
+					}
+				}));
+		}
+
+		menu.showAtMouseEvent(evt);
+	});
 
 	/** Enter editing mode — reads the current db value (or empty string) and auto-detects mode. */
 	function startEditing() {

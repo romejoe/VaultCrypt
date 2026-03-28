@@ -177,6 +177,83 @@ export class UnlockSessionService {
 	}
 
 	/**
+	 * Returns all field key-value pairs for an entry, or null if the profile is
+	 * locked or the entry cannot be found.  ProtectedValue instances are unwrapped
+	 * to plaintext strings.
+	 */
+	getEntryFields(profileId: string, entryPath: string): Record<string, string> | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		const result: Record<string, string> = {};
+		for (const [key, value] of entry.fields) {
+			if (value === undefined || value === null) continue;
+			result[key] = value instanceof kdbxweb.ProtectedValue ? value.getText() : value;
+		}
+		return result;
+	}
+
+	/**
+	 * Replaces all non-Title fields on an existing entry and saves the database.
+	 * Fields present in `fields` are set (created or updated); fields absent from
+	 * `fields` but present on the entry are removed.  The Title field is never
+	 * modified.  Throws if the profile is locked or the entry does not exist.
+	 */
+	async updateEntryFields(
+		profileId: string,
+		entryPath: string,
+		fields: Record<string, string>,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+
+		// Remove all non-Title fields, then re-set from the provided record.
+		const keysToRemove = [...entry.fields.keys()].filter(k => k !== 'Title');
+		for (const key of keysToRemove) {
+			entry.fields.delete(key);
+		}
+
+		for (const [key, value] of Object.entries(fields)) {
+			if (key === 'Title') continue;
+			if (!value) continue;
+			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
+				? kdbxweb.ProtectedValue.fromString(value)
+				: value;
+			entry.fields.set(key, fieldValue);
+		}
+		entry.times.update();
+
+		const buffer = await db.save();
+		await this.adapter.writeBinary(kdbxFilePath, buffer);
+	}
+
+	/**
+	 * Deletes an entry from an open profile's database and saves to disk.
+	 * Throws if the profile is locked or the entry does not exist.
+	 */
+	async deleteEntry(
+		profileId: string,
+		entryPath: string,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+
+		db.remove(entry);
+
+		const buffer = await db.save();
+		await this.adapter.writeBinary(kdbxFilePath, buffer);
+	}
+
+	/**
 	 * Returns the field names present on an entry, or null if the profile is locked
 	 * or the entry cannot be found.
 	 */
