@@ -138,7 +138,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 						const shell = (window as any).require?.('electron')?.shell;
 						const adapter = plugin.app.vault.adapter as { getFullPath?: (path: string) => string };
 						if (shell && adapter.getFullPath) {
-							// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
+							// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
 							const errorMsg: string = await shell.openPath(adapter.getFullPath(config.path));
 							if (errorMsg) {
 								new Notice(`Failed to open file: ${errorMsg}`);
