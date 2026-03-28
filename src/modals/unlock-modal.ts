@@ -1,10 +1,14 @@
-import {App, ButtonComponent, Modal, Setting} from 'obsidian';
+import {App, ButtonComponent, Modal, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
 
 export class UnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private selectedProfileId: string;
 	private password = "";
+	private useKeyring = false;
+	private keyringToggleSetting: Setting | null = null;
+	private passwordSetting!: Setting;
+	private passwordInputEl!: HTMLInputElement;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
@@ -28,6 +32,9 @@ export class UnlockModal extends Modal {
 			(preselectedProfileId && lockedIds.includes(preselectedProfileId))
 				? preselectedProfileId
 				: lockedIds[0] ?? "";
+		// Default to keyring mode if the pre-selected profile is managed by keyring
+		this.useKeyring = plugin.settings.keyringEnabled &&
+			(plugin.settings.profiles[this.selectedProfileId]?.managedByKeyring ?? false);
 	}
 
 	onOpen() {
@@ -54,16 +61,31 @@ export class UnlockModal extends Modal {
 				}
 				dd.setValue(this.selectedProfileId).onChange(value => {
 					this.selectedProfileId = value;
+					this.updateKeyringSection();
 				});
 			});
 
+		if (this.plugin.settings.keyringEnabled) {
+			this.keyringToggleSetting = new Setting(contentEl)
+				.setName("Use keyring master password")
+				.setDesc("Unlock using the master keyring password instead of the profile password")
+				.addToggle((toggle: ToggleComponent) => {
+					toggle.setValue(this.useKeyring)
+						.onChange((value: boolean) => {
+							this.useKeyring = value;
+							this.clearPassword();
+							this.updatePasswordLabel();
+						});
+				});
+		}
 
-		new Setting(contentEl)
-			.setName("Master password")
+		this.passwordSetting = new Setting(contentEl)
+			.setName(this.useKeyring ? "Keyring master password" : "Profile password")
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
-				text.setPlaceholder("Enter master password")
+				this.passwordInputEl = text.inputEl;
+				text.setPlaceholder("Enter password")
 					.onChange(value => {
 						this.password = value;
 					});
@@ -87,6 +109,34 @@ export class UnlockModal extends Modal {
 					.setCta()
 					.onClick(() => this.submit());
 			});
+
+		this.updateKeyringSection();
+	}
+
+	private isSelectedProfileKeyringManaged(): boolean {
+		return this.plugin.settings.keyringEnabled &&
+			(this.plugin.settings.profiles[this.selectedProfileId]?.managedByKeyring ?? false);
+	}
+
+	private updateKeyringSection() {
+		if (!this.keyringToggleSetting) return;
+		const isManaged = this.isSelectedProfileKeyringManaged();
+		this.keyringToggleSetting.settingEl.style.display = isManaged ? '' : 'none';
+		if (!isManaged && this.useKeyring) {
+			this.useKeyring = false;
+			(this.keyringToggleSetting.components[0] as ToggleComponent).setValue(false);
+			this.clearPassword();
+		}
+		this.updatePasswordLabel();
+	}
+
+	private updatePasswordLabel() {
+		this.passwordSetting.setName(this.useKeyring ? "Keyring master password" : "Profile password");
+	}
+
+	private clearPassword() {
+		this.password = "";
+		this.passwordInputEl.value = "";
 	}
 
 	private showError(msg: string) {
@@ -101,11 +151,17 @@ export class UnlockModal extends Modal {
 			return;
 		}
 		if (!this.password) {
-			this.showError("Master password is required.");
+			this.showError("Password is required.");
 			return;
 		}
 
-		const config = this.plugin.settings.profiles[this.selectedProfileId];
+		// Snapshot mutable form state before any await to prevent race conditions
+		// if the user changes the dropdown or toggle while the async flow is in flight.
+		const profileId = this.selectedProfileId;
+		const submittedPassword = this.password;
+		const useKeyring = this.useKeyring;
+
+		const config = this.plugin.settings.profiles[profileId];
 		if (!config) {
 			this.showError("Profile not found.");
 			return;
@@ -114,12 +170,39 @@ export class UnlockModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			await this.plugin.sessionService.unlockProfile(this.selectedProfileId, config, this.password);
+			if (useKeyring) {
+				let passwords: Map<string, string>;
+				try {
+					passwords = await this.plugin.keyringService.getProfilePasswords(
+						this.plugin.settings.masterKeyringPath,
+						submittedPassword,
+						[profileId],
+					);
+				} catch (e) {
+					console.error(e);
+					this.showError("Incorrect keyring master password or corrupted keyring.");
+					return;
+				}
+				const profilePassword = passwords.get(profileId);
+				if (!profilePassword) {
+					this.showError("Profile not found in keyring.");
+					return;
+				}
+				try {
+					await this.plugin.sessionService.unlockProfile(profileId, config, profilePassword);
+				} catch (e) {
+					console.error(e);
+					this.showError("Stored profile password is incorrect or corrupted.");
+					return;
+				}
+			} else {
+				await this.plugin.sessionService.unlockProfile(profileId, config, submittedPassword);
+			}
 			this.close();
-			this.onDone?.(this.selectedProfileId);
+			this.onDone?.(profileId);
 		} catch (e) {
 			console.error(e);
-			this.showError(`Incorrect password or corrupted database.`);
+			this.showError("Incorrect password or corrupted database.");
 		} finally {
 			this.isSubmitting = false;
 			this.submitBtn.setDisabled(false);
