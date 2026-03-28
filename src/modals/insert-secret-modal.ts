@@ -177,7 +177,10 @@ export class InsertSecretModal extends Modal {
 	private tokenPreviewEl!: HTMLElement;
 	private errorEl!: HTMLParagraphElement;
 	private insertBtn!: ButtonComponent;
+	private entryNameTextComponent?: TextComponent;
+	private userNameTextComponent?: TextComponent;
 	private passwordTextComponent?: TextComponent;
+	private urlTextComponent?: TextComponent;
 	private isSubmitting = false;
 	private isOpen = false;
 	private stopLockEffect?: StopEffect;
@@ -302,6 +305,21 @@ export class InsertSecretModal extends Modal {
 		this.newEntryGroupPath = null;
 		this.virtualGroupPaths.clear();
 		this.expandedPaths.clear();
+
+		// Reset new-entry draft so it doesn't leak into a different profile
+		this.entryName = '';
+		this.fieldUserName = '';
+		this.fieldPassword = '';
+		this.fieldURL = '';
+		this.customFields = [];
+		this.referenceField = '';
+		this.entryNameTextComponent?.setValue('');
+		this.userNameTextComponent?.setValue('');
+		this.passwordTextComponent?.setValue('');
+		this.urlTextComponent?.setValue('');
+		this.customFieldsContainerEl?.empty();
+		this.entryNameErrorEl?.addClass('vaultcrypt-hidden');
+
 		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
 		this.renderTree();
 		this.refreshFieldDropdown();
@@ -505,30 +523,34 @@ export class InsertSecretModal extends Modal {
 		new Setting(container)
 			.setName('Entry name (required)')
 			.setDesc('Becomes the entry title in the database')
-			.addText(text => text
-				.setPlaceholder('Enter entry name')
-				.onChange(value => {
-					this.entryName = value;
-					if (value && !VALID_PATH_SEGMENT.test(value)) {
-						this.entryNameErrorEl.textContent = 'Entry name can only contain letters, digits, hyphens, and underscores';
-						this.entryNameErrorEl.removeClass('vaultcrypt-hidden');
-					} else {
-						this.entryNameErrorEl.addClass('vaultcrypt-hidden');
-					}
-					this.refreshFieldDropdown();
-					this.updateTokenPreview();
-					this.updateInsertButtonState();
-				}));
+			.addText(text => {
+				this.entryNameTextComponent = text;
+				text.setPlaceholder('Enter entry name')
+					.onChange(value => {
+						this.entryName = value;
+						if (value && !VALID_PATH_SEGMENT.test(value)) {
+							this.entryNameErrorEl.textContent = 'Entry name can only contain letters, digits, hyphens, and underscores';
+							this.entryNameErrorEl.removeClass('vaultcrypt-hidden');
+						} else {
+							this.entryNameErrorEl.addClass('vaultcrypt-hidden');
+						}
+						this.refreshFieldDropdown();
+						this.updateTokenPreview();
+						this.updateInsertButtonState();
+					});
+			});
 		this.entryNameErrorEl = container.createEl('p', {cls: 'mod-warning vaultcrypt-hidden'});
 
 		new Setting(container)
 			.setName('Username')
-			.addText(text => text
-				.setPlaceholder('Optional')
-				.onChange(value => {
-					this.fieldUserName = value;
-					this.refreshFieldDropdown();
-				}));
+			.addText(text => {
+				this.userNameTextComponent = text;
+				text.setPlaceholder('Optional')
+					.onChange(value => {
+						this.fieldUserName = value;
+						this.refreshFieldDropdown();
+					});
+			});
 
 		new Setting(container)
 			.setName('Password')
@@ -565,12 +587,14 @@ export class InsertSecretModal extends Modal {
 
 		new Setting(container)
 			.setName('URL')
-			.addText(text => text
-				.setPlaceholder('Optional')
-				.onChange(value => {
-					this.fieldURL = value;
-					this.refreshFieldDropdown();
-				}));
+			.addText(text => {
+				this.urlTextComponent = text;
+				text.setPlaceholder('Optional')
+					.onChange(value => {
+						this.fieldURL = value;
+						this.refreshFieldDropdown();
+					});
+			});
 
 		this.customFieldsContainerEl = container.createDiv();
 
@@ -636,13 +660,17 @@ export class InsertSecretModal extends Modal {
 		const options: string[] = [];
 
 		if (this.selectedEntryPath) {
+			const profileId = peek(this.selectedProfileId$);
 			const names = this.plugin.sessionService.getEntryFieldNames(
-				peek(this.selectedProfileId$),
+				profileId,
 				this.selectedEntryPath,
 			);
 			if (names) {
 				for (const name of names) {
-					if (name !== 'Title') options.push(name);
+					if (name === 'Title') continue;
+					// Only offer fields that have a non-empty value
+					const val = this.plugin.sessionService.getFieldValue(profileId, this.selectedEntryPath, name);
+					if (val) options.push(name);
 				}
 			}
 		} else if (this.newEntryGroupPath !== null) {

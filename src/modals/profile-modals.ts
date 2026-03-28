@@ -95,10 +95,7 @@ export class AddProfileModal extends Modal {
 					}));
 
 			// Move the keyring password setting after the toggle visually
-			contentEl.insertBefore(
-				keyringPasswordSetting.settingEl,
-				contentEl.lastElementChild,
-			);
+			contentEl.appendChild(keyringPasswordSetting.settingEl);
 		}
 
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});
@@ -485,16 +482,22 @@ export class DeleteProfileModal extends Modal {
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			// Remove from keyring before deleting the profile; fail closed so a
-			// wrong password or write error doesn't leave an orphaned keyring entry
-			if (this.config.managedByKeyring) {
-				await this.plugin.keyringService.removeProfilePassword(
-					this.plugin.settings.masterKeyringPath,
-					this.keyringPassword,
-					this.profileName.toLowerCase(),
-				);
-			}
+			// Delete profile first so a failure doesn't leave us without a keyring entry
 			await this.plugin.deleteProfile(this.profileName, this.deleteFile);
+
+			// Clean up keyring entry after successful deletion; log but don't
+			// fail if the keyring removal itself errors
+			if (this.config.managedByKeyring) {
+				try {
+					await this.plugin.keyringService.removeProfilePassword(
+						this.plugin.settings.masterKeyringPath,
+						this.keyringPassword,
+						this.profileName.toLowerCase(),
+					);
+				} catch (e) {
+					console.error('[VaultCrypt] Failed to remove keyring entry after profile deletion', e);
+				}
+			}
 			this.close();
 			this.onDone();
 		} catch (e) {
