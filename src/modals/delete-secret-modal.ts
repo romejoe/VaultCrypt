@@ -23,7 +23,7 @@ export class DeleteSecretModal extends Modal {
 		});
 		contentEl.createEl('p', {
 			cls: 'mod-warning',
-			text: 'This action cannot be undone. Inline references to this entry will show a "not found" indicator.',
+			text: 'This action cannot be undone. Inline references to this entry will show a "not found" indicator when revealed.',
 		});
 
 		new Setting(contentEl)

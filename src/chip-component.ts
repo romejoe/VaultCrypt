@@ -127,7 +127,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setTitle('Open in KeePassXC')
 				.setIcon('external-link')
-				.onClick(() => {
+				.onClick(async () => {
 					const config = peek(profileConfig);
 					if (!config) {
 						new Notice('Profile configuration not found');
@@ -139,7 +139,10 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 						const adapter = plugin.app.vault.adapter as { getFullPath?: (path: string) => string };
 						if (shell && adapter.getFullPath) {
 							// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
-							shell.openPath(adapter.getFullPath(config.path));
+							const errorMsg: string = await shell.openPath(adapter.getFullPath(config.path));
+							if (errorMsg) {
+								new Notice(`Failed to open file: ${errorMsg}`);
+							}
 						} else {
 							new Notice('Cannot determine full file path');
 						}

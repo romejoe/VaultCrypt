@@ -212,6 +212,9 @@ export class UnlockSessionService {
 		const entry = this.resolveEntry(db, entryPath);
 		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
 
+		// Snapshot existing fields so we can restore on save failure.
+		const snapshot = new Map(entry.fields);
+
 		// Remove all non-Title fields, then re-set from the provided record.
 		const keysToRemove = [...entry.fields.keys()].filter(k => k !== 'Title');
 		for (const key of keysToRemove) {
@@ -228,13 +231,23 @@ export class UnlockSessionService {
 		}
 		entry.times.update();
 
-		const buffer = await db.save();
-		await this.adapter.writeBinary(kdbxFilePath, buffer);
+		try {
+			const buffer = await db.save();
+			await this.adapter.writeBinary(kdbxFilePath, buffer);
+		} catch (err) {
+			// Restore the entry to its pre-edit state so the in-memory session
+			// does not serve unsaved changes.
+			entry.fields.clear();
+			for (const [k, v] of snapshot) entry.fields.set(k, v);
+			throw err;
+		}
 	}
 
 	/**
 	 * Deletes an entry from an open profile's database and saves to disk.
-	 * Throws if the profile is locked or the entry does not exist.
+	 * If persistence fails the profile is locked so the in-memory session
+	 * cannot serve stale data.  Throws if the profile is locked or the entry
+	 * does not exist.
 	 */
 	async deleteEntry(
 		profileId: string,
@@ -249,8 +262,15 @@ export class UnlockSessionService {
 
 		db.remove(entry);
 
-		const buffer = await db.save();
-		await this.adapter.writeBinary(kdbxFilePath, buffer);
+		try {
+			const buffer = await db.save();
+			await this.adapter.writeBinary(kdbxFilePath, buffer);
+		} catch (err) {
+			// A delete cannot be trivially rolled back in kdbxweb, so lock the
+			// profile to force a clean reload from disk on next unlock.
+			this.lockProfile(profileId);
+			throw err;
+		}
 	}
 
 	/**

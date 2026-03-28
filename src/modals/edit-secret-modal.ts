@@ -1,4 +1,4 @@
-import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TextComponent} from 'obsidian';
+import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TFile, TextComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
 import {GeneratePasswordModal} from './generate-password-modal';
 import type {ParsedVcToken} from '../inline-parser';
@@ -19,6 +19,7 @@ export class EditSecretModal extends Modal {
 	private fieldUserName = '';
 	private fieldPassword = '';
 	private fieldURL = '';
+	private fieldNotes = '';
 	private customFields: { key: string; value: string }[] = [];
 
 	// Reference field
@@ -26,6 +27,9 @@ export class EditSecretModal extends Modal {
 	private originalReferenceField = '';
 	private fieldRefDropdown?: DropdownComponent;
 	private tokenPreviewEl!: HTMLElement;
+
+	// The file that was active when the modal opened — used for token replacement
+	private sourceFile: TFile | null = null;
 
 	// DOM refs
 	private customFieldsContainerEl!: HTMLElement;
@@ -40,6 +44,7 @@ export class EditSecretModal extends Modal {
 		this.profileId = profileId;
 		this.entryPath = entryPath;
 		this.token = token;
+		this.sourceFile = this.app.workspace.getActiveFile();
 	}
 
 	onOpen() {
@@ -63,6 +68,7 @@ export class EditSecretModal extends Modal {
 		this.fieldUserName = fields['UserName'] ?? '';
 		this.fieldPassword = fields['Password'] ?? '';
 		this.fieldURL = fields['URL'] ?? '';
+		this.fieldNotes = fields['Notes'] ?? '';
 
 		// Collect custom fields (non-standard)
 		for (const [key, value] of Object.entries(fields)) {
@@ -138,6 +144,19 @@ export class EditSecretModal extends Modal {
 					});
 			});
 
+		// Notes
+		new Setting(contentEl)
+			.setName('Notes')
+			.addTextArea(text => {
+				text.setPlaceholder('Optional')
+					.setValue(this.fieldNotes)
+					.onChange(value => {
+						this.fieldNotes = value;
+						this.refreshFieldDropdown();
+					});
+				text.inputEl.rows = 4;
+			});
+
 		// Custom fields
 		this.customFieldsContainerEl = contentEl.createDiv();
 		this.renderCustomFields();
@@ -198,18 +217,21 @@ export class EditSecretModal extends Modal {
 					.setValue(field.key)
 					.onChange(v => {
 						field.key = v;
+						this.refreshFieldDropdown();
 					}))
 				.addText(text => text
 					.setPlaceholder('Value')
 					.setValue(field.value)
 					.onChange(v => {
 						field.value = v;
+						this.refreshFieldDropdown();
 					}))
 				.addButton(btn => btn
 					.setButtonText('\u00d7')
 					.onClick(() => {
 						this.customFields.splice(i, 1);
 						this.renderCustomFields();
+						this.refreshFieldDropdown();
 					}));
 		}
 	}
@@ -223,6 +245,7 @@ export class EditSecretModal extends Modal {
 		options.push('Password');
 		if (this.fieldUserName) options.push('UserName');
 		if (this.fieldURL) options.push('URL');
+		if (this.fieldNotes) options.push('Notes');
 		for (const cf of this.customFields) {
 			if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
 		}
@@ -295,6 +318,7 @@ export class EditSecretModal extends Modal {
 			if (this.fieldUserName) fields['UserName'] = this.fieldUserName;
 			if (this.fieldPassword) fields['Password'] = this.fieldPassword;
 			if (this.fieldURL) fields['URL'] = this.fieldURL;
+			if (this.fieldNotes) fields['Notes'] = this.fieldNotes;
 			for (const cf of this.customFields) {
 				if (cf.key && cf.value) fields[cf.key] = cf.value;
 			}
@@ -309,7 +333,7 @@ export class EditSecretModal extends Modal {
 			// If the reference field changed, update the token in the source file
 			if (this.referenceField !== this.originalReferenceField) {
 				const newToken = this.buildTokenString();
-				await this.replaceTokenInActiveFile(this.token.raw, newToken);
+				await this.replaceTokenInSourceFile(this.token.raw, newToken);
 			}
 
 			this.plugin.refreshChips();
@@ -325,17 +349,16 @@ export class EditSecretModal extends Modal {
 	}
 
 	/**
-	 * Finds the old token string in the active markdown file and replaces it
-	 * with the new token string.  Uses the Vault API so it works regardless of
-	 * whether the file is open in source, live-preview, or reading mode.
+	 * Finds the old token string in the source file (captured at modal open)
+	 * and replaces it with the new token string.  Uses the Vault API so it
+	 * works regardless of view mode.
 	 */
-	private async replaceTokenInActiveFile(oldToken: string, newToken: string): Promise<void> {
-		const file = this.app.workspace.getActiveFile();
-		if (!file) return;
-		const content = await this.app.vault.read(file);
+	private async replaceTokenInSourceFile(oldToken: string, newToken: string): Promise<void> {
+		if (!this.sourceFile) return;
+		const content = await this.app.vault.read(this.sourceFile);
 		if (!content.includes(oldToken)) return;
 		const updated = content.split(oldToken).join(newToken);
-		await this.app.vault.modify(file, updated);
+		await this.app.vault.modify(this.sourceFile, updated);
 	}
 
 	onClose() {

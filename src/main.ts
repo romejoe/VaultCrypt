@@ -550,7 +550,11 @@ export default class VaultCryptPlugin extends Plugin {
 	 */
 	public refreshChips(): void {
 		this.refreshAllEditorChips();
-		this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
+		this.app.workspace.iterateAllLeaves(leaf => {
+			if (leaf.view instanceof MarkdownView) {
+				leaf.view.previewMode.rerender(true);
+			}
+		});
 	}
 
 	/**
