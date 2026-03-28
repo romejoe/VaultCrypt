@@ -12,6 +12,10 @@ If your plugin does not need CSS, delete this file.
 	display: none;
 }
 
+.vaultcrypt-flex {
+	display: flex;
+}
+
 /* Source mode: subtle background highlight on raw {{vc:...}} token */
 .vaultcrypt-token {
 	background-color: rgba(var(--color-accent-rgb), 0.12);
@@ -193,4 +197,131 @@ If your plugin does not need CSS, delete this file.
 .vaultcrypt-chip-btn-saved {
 	color: var(--color-green) !important;
 	opacity: 1 !important;
+}
+
+/* ── Insert Secret Modal — tree view ────────────────────────────────────────── */
+
+.vaultcrypt-tree-container {
+	max-height: 220px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 4px 8px;
+	margin: 4px 0 8px;
+}
+
+.vaultcrypt-tree-ul {
+	list-style-type: none;
+	margin: 0;
+	padding-left: 16px;
+}
+
+.vaultcrypt-tree-ul.vaultcrypt-tree-root {
+	padding-left: 0;
+}
+
+.vaultcrypt-tree-caret {
+	cursor: pointer;
+	user-select: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
+	font-weight: var(--font-semibold);
+}
+
+.vaultcrypt-tree-caret::before {
+	content: "▶";
+	display: inline-block;
+	font-size: 0.6em;
+	transition: transform 0.1s;
+}
+
+.vaultcrypt-tree-caret.vaultcrypt-tree-caret-open::before {
+	transform: rotate(90deg);
+}
+
+.vaultcrypt-tree-caret:hover {
+	background: var(--background-modifier-hover);
+}
+
+.vaultcrypt-tree-nested {
+	display: none;
+}
+
+.vaultcrypt-tree-nested.vaultcrypt-tree-active {
+	display: block;
+}
+
+.vaultcrypt-tree-entry,
+.vaultcrypt-tree-new-entry {
+	cursor: pointer;
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
+	user-select: none;
+}
+
+.vaultcrypt-tree-entry:hover,
+.vaultcrypt-tree-new-entry:hover {
+	background: var(--background-modifier-hover);
+}
+
+.vaultcrypt-tree-entry.is-active {
+	background: var(--background-modifier-active-hover);
+	color: var(--text-accent);
+}
+
+.vaultcrypt-tree-new-entry.is-active {
+	background: rgba(var(--color-green-rgb), 0.12);
+	color: var(--color-green);
+}
+
+.vaultcrypt-tree-new-entry {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* Inline input for new group name in tree */
+.vaultcrypt-tree-group-input {
+	width: 120px;
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid var(--text-accent);
+	color: inherit;
+	outline: none;
+	font-size: inherit;
+}
+
+/* Token preview line shown beneath the field reference dropdown */
+.vaultcrypt-token-preview-row {
+	padding: 4px var(--size-4-3);
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+/* Password preview in GeneratePasswordModal */
+.vaultcrypt-password-preview {
+	font-family: var(--font-monospace);
+	font-size: 0.85em;
+	word-break: break-all;
+	color: var(--text-normal);
+}
+
+/* Locked-profile warning row */
+.vaultcrypt-insert-locked-warning {
+	align-items: center;
+	gap: 8px;
+	padding: 4px var(--size-4-3);
+	margin: 4px 0;
+}
+
+.vaultcrypt-insert-locked-warning > p {
+	margin: 0;
+	flex: 1;
+}
+
+.vaultcrypt-insert-locked-warning-show {
+	display: flex;
 }

@@ -4,7 +4,7 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {KeyringService} from './keyring-service';
-import {UnlockModal, KeyringUnlockModal} from './modals';
+import {UnlockModal, KeyringUnlockModal, InsertSecretModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
@@ -79,6 +79,7 @@ export default class VaultCryptPlugin extends Plugin {
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
 	keyringService!: KeyringService;
+	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
 	async onload() {
@@ -279,11 +280,20 @@ export default class VaultCryptPlugin extends Plugin {
 		this.addCommand({
 			id: 'vault-crypt-insert-secret',
 			name: 'Insert secret',
-			callback: () => {
-				new Notice('Insert secret command executed');
-				// Stub — implemented in a later issue
+			editorCallback: (editor: Editor) => {
+				new InsertSecretModal(this.app, this, editor).open();
 			}
 		});
+
+		this.registerEvent(
+			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor) => {
+				menu.addItem(item => item
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+					.setTitle('VaultCrypt: Insert secret here')
+					.setIcon('key')
+					.onClick(() => new InsertSecretModal(this.app, this, editor).open()));
+			})
+		);
 
 		// Auto-prompt when a note containing {{vc:...}} references is opened
 		this.registerEvent(this.app.workspace.on('file-open', async (file: TFile | null) => {

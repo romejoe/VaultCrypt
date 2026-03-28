@@ -4,8 +4,25 @@ import {ProfileConfig} from './settings';
 
 const PROTECTED_FIELDS = new Set(['Password']);
 
+/** Characters allowed in a single path segment (group or entry name) for inline-token parsing. */
+const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
+
+/** A lightweight tree node representing a KeePass group for display purposes. */
+export interface DbTreeNode {
+	name: string;
+	path: string;
+	groups: DbTreeNode[];
+	entries: DbTreeEntry[];
+}
+
+/** A lightweight representation of a KeePass entry for tree display. */
+export interface DbTreeEntry {
+	name: string;
+	path: string;
+}
 
 /**
  * Manages the in-memory session of unlocked KDBX databases.
@@ -149,6 +166,59 @@ export class UnlockSessionService {
 		await this.adapter.writeBinary(kdbxFilePath, buffer);
 	}
 
+	/**
+	 * Returns the group/entry hierarchy of an unlocked profile as a lightweight tree,
+	 * or null if the profile is locked.
+	 */
+	getEntryTree(profileId: string): DbTreeNode | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		return this.buildTreeNode(db.getDefaultGroup(), '');
+	}
+
+	/**
+	 * Returns the field names present on an entry, or null if the profile is locked
+	 * or the entry cannot be found.
+	 */
+	getEntryFieldNames(profileId: string, entryPath: string): string[] | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		return [...entry.fields.keys()];
+	}
+
+	/**
+	 * Creates a new entry with all provided fields at once and saves the database.
+	 * Throws if the profile is locked, or if an entry already exists at the given path.
+	 */
+	async createEntryWithFields(
+		profileId: string,
+		entryPath: string,
+		fields: Record<string, string>,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+
+		if (this.resolveEntry(db, entryPath)) {
+			throw new Error(`An entry already exists at "${entryPath}"`);
+		}
+
+		const entry = this.resolveOrCreateEntry(db, entryPath);
+		for (const [key, value] of Object.entries(fields)) {
+			if (!value) continue;
+			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
+				? kdbxweb.ProtectedValue.fromString(value)
+				: value;
+			entry.fields.set(key, fieldValue);
+		}
+		entry.times.update();
+
+		const buffer = await db.save();
+		await this.adapter.writeBinary(kdbxFilePath, buffer);
+	}
+
 	/** Register a callback to be called when any profile is locked. */
 	onLock(cb: LockCallback): void {
 		this.lockCallbacks.push(cb);
@@ -203,6 +273,27 @@ export class UnlockSessionService {
 		const entry = db.createEntry(group);
 		entry.fields.set('Title', title);
 		return entry;
+	}
+
+	private buildTreeNode(group: kdbxweb.KdbxGroup, groupPath: string): DbTreeNode {
+		const childGroups: DbTreeNode[] = [];
+		for (const g of group.groups) {
+			const childName = g.name ?? '';
+			// Skip groups whose names can't be represented in token syntax
+			if (!childName || !VALID_PATH_SEGMENT.test(childName)) continue;
+			const childPath = groupPath ? `${groupPath}/${childName}` : childName;
+			childGroups.push(this.buildTreeNode(g, childPath));
+		}
+		const entries: DbTreeEntry[] = [];
+		for (const e of group.entries) {
+			const titleVal = e.fields.get('Title');
+			const title = titleVal instanceof kdbxweb.ProtectedValue ? titleVal.getText() : (titleVal ?? '');
+			// Skip entries whose titles can't be represented in token syntax
+			if (!title || !VALID_PATH_SEGMENT.test(title)) continue;
+			const entryPath = groupPath ? `${groupPath}/${title}` : title;
+			entries.push({ name: title, path: entryPath });
+		}
+		return { name: group.name ?? '', path: groupPath, groups: childGroups, entries };
 	}
 
 	private scheduleAutoLock(profileId: string, autoLockMinutes: number): void {
