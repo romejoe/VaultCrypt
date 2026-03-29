@@ -81,7 +81,7 @@ export class InsertSecretModal extends Modal {
 		this.selectedProfileLocked$ = computed(() => {
 			const profile = this.selectedProfile$();
 			return profile?.isLocked ?? true;
-		})
+		});
 	}
 
 	onOpen() {

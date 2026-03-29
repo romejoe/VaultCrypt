@@ -63,7 +63,7 @@ export class ProfileService {
 				autoLockMinutes: 0,
 				defaultField: 'password',
 				managedByKeyring: false,
-			}
+			};
 		});
 		await this.writeConfigFile();
 	}
@@ -110,7 +110,7 @@ export class ProfileService {
 			if (newSettings.general.defaultProfile.toLowerCase() === oldKey) {
 				newSettings.general.defaultProfile = newKey;
 			}
-		})
+		});
 
 		this.mutateState((state) => {
 			// Update runtime state
@@ -161,7 +161,7 @@ export class ProfileService {
 			if (state.currentProfile?.id === key) {
 				state.currentProfile = null;
 			}
-		})
+		});
 
 		await this.writeConfigFile();
 	}

@@ -30,7 +30,7 @@ const DEFAULT_STATE: VaultCryptState = {
 	profiles: [],
 	currentProfile: null,
 	isLocked: true,
-}
+};
 
 interface ElectronClipboard {
 	writeText(s: string): void;
@@ -399,7 +399,7 @@ export default class VaultCryptPlugin extends Plugin {
 				const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
 				this.statusBarItem.setText(parts.join(' | '));
 			})
-		]
+		];
 
 	}
 
@@ -516,7 +516,7 @@ export default class VaultCryptPlugin extends Plugin {
 				);
 				state.currentProfile = still ?? null;
 			}
-		})
+		});
 
 	}
 

@@ -22,6 +22,11 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			'semi': 'error',
+		}
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

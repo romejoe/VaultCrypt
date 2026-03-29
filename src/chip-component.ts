@@ -65,12 +65,12 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 
 	const field = computed(() => {
 		const config = profileConfig();
-		return resolveFieldName(token, config?.defaultField ?? 'Password')
+		return resolveFieldName(token, config?.defaultField ?? 'Password');
 	});
 
 	const tooltipPath = computed(() => {
 		return `${profileId}/${token.entryPath}#${field()}`;
-	})
+	});
 
 	let cleanupPopover = () => {
 		if (activePopover) {
@@ -84,7 +84,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		for (const effect of effects) {
 			effect?.();
 		}
-	})
+	});
 
 	// ── Context menu (right-click) ──────────────────────────────────────────
 	root.addEventListener('contextmenu', (evt) => {

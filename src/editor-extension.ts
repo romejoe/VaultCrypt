@@ -84,8 +84,7 @@ function flattenTreeToCompletions(
 		// Entry-level completion (uses the profile's default field)
 		out.push({
 			label: `{{vc:${profileId}/${entry.path}}}`,
-			displayLabel: entry.path,
-			detail: profileName,
+			displayLabel: `${profileName}/${entry.path}`,
 			type: 'variable',
 		});
 
@@ -96,8 +95,7 @@ function flattenTreeToCompletions(
 				if (field === 'Title') continue;
 				out.push({
 					label: `{{vc:${profileId}/${entry.path}#${field}}}`,
-					displayLabel: `${entry.path}#${field}`,
-					detail: profileName,
+					displayLabel: `${profileName}/${entry.path}#${field}`,
 					type: 'property',
 				});
 			}
@@ -113,15 +111,19 @@ function vcCompletionSource(plugin: VaultCryptPlugin) {
 		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_\-/]*(?:#[a-zA-Z0-9_-]*)?\w*/);
 		if (!before || (before.from === before.to && !context.explicit)) return null;
 
-		const options: Completion[] = [];
+		let options: Completion[] = [];
 		const unlockedProfiles = plugin.vaultCryptState.profiles.filter(p => !p.isLocked);
 		for (const profile of unlockedProfiles) {
 			const tree = plugin.sessionService.getEntryTree(profile.id);
 			if (!tree) continue;
-			flattenTreeToCompletions(tree, profile.id, profile.name, plugin, options);
+			const profileOptions:Completion[] = [];
+			flattenTreeToCompletions(tree, profile.id, profile.name, plugin, profileOptions);
+			options.push(...profileOptions.filter(o => o.label.startsWith(before.text)));
 		}
 
 		if (options.length === 0) return null;
+
+		options = options.sort((a, b) => (a.displayLabel ?? "").localeCompare(b.displayLabel ?? ""));
 
 		// If }} already exists after the cursor, extend the replacement range to
 		// cover them so we don't end up with duplicate closing braces.
@@ -129,10 +131,10 @@ function vcCompletionSource(plugin: VaultCryptPlugin) {
 		const to = afterCursor === '}}' ? context.pos + 2 : undefined;
 
 		return {
+			filter: false,
 			from: before.from,
 			to,
 			options,
-			validFor: /^\{\{vc:[a-zA-Z0-9_\-/]*(?:#[a-zA-Z0-9_-]*)?\w*/,
 		};
 	};
 }
@@ -169,5 +171,8 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 		},
 	});
 
-	return [viewPlugin, copyHandler, autocompletion({override: [vcCompletionSource(plugin)]})];
+	return [viewPlugin, copyHandler, autocompletion({
+		filterStrict: true,
+		override: [vcCompletionSource(plugin)]
+	})];
 }
