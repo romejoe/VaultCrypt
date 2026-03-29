@@ -4,7 +4,7 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {KeyringService} from './keyring-service';
-import {UnlockModal, KeyringUnlockModal, InsertSecretModal} from './modals';
+import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
@@ -30,7 +30,7 @@ const DEFAULT_STATE: VaultCryptState = {
 	profiles: [],
 	currentProfile: null,
 	isLocked: true,
-}
+};
 
 interface ElectronClipboard {
 	writeText(s: string): void;
@@ -285,6 +285,14 @@ export default class VaultCryptPlugin extends Plugin {
 			}
 		});
 
+		this.addCommand({
+			id: 'vault-crypt-search-secrets',
+			name: 'Search secrets',
+			editorCallback: (editor: Editor) => {
+				new SearchSecretsModal(this.app, this, editor).open();
+			}
+		});
+
 		this.registerEvent(
 			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor) => {
 				menu.addItem(item => item
@@ -391,7 +399,7 @@ export default class VaultCryptPlugin extends Plugin {
 				const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);
 				this.statusBarItem.setText(parts.join(' | '));
 			})
-		]
+		];
 
 	}
 
@@ -508,7 +516,7 @@ export default class VaultCryptPlugin extends Plugin {
 				);
 				state.currentProfile = still ?? null;
 			}
-		})
+		});
 
 	}
 

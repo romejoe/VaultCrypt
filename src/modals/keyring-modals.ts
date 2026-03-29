@@ -468,7 +468,7 @@ export class RemoveFromKeyringModal extends Modal {
 			this.plugin.mutateState((s: VaultCryptState) => {
 				const profile = s.profiles.find(profile => profile.id === this.profileId);
 				if (profile) profile.managedByKeyring = false;
-			})
+			});
 
 			new Notice(`Profile "${this.profileId}" removed from keyring.`);
 			this.close();
@@ -683,7 +683,7 @@ export class DeleteKeyringModal extends Modal {
 
 			this.plugin.mutateState((s: VaultCryptState) => {
 				s.profiles.forEach(profile => profile.managedByKeyring = false);
-			})
+			});
 
 			new Notice("Keyring deleted.");
 			this.close();

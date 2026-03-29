@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		autoUnmask: false,
 		saveOnBlur: true,
 	}
-}
+};
 
 export function validateProfileName(name: string, existingNames: string[]): string | null {
 	if (!name) return "Profile name is required.";
