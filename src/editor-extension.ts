@@ -2,7 +2,7 @@ import {editorLivePreviewField} from 'obsidian';
 import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType} from '@codemirror/view';
 import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
 import {autocompletion, Completion, CompletionContext, CompletionResult} from '@codemirror/autocomplete';
-import {parseVcTokens, ParsedVcToken} from './inline-parser';
+import {parseVcTokens, ParsedVcToken, VALID_TOKEN_SEGMENT} from './inline-parser';
 import {buildChipElement, CHIP_DESTROY_EVENT} from './chip-component';
 import {buildCopyTextFromEditorSelection} from './clipboard-intercept';
 import type VaultCryptPlugin from './main';
@@ -93,6 +93,7 @@ function flattenTreeToCompletions(
 		if (fieldNames) {
 			for (const field of fieldNames) {
 				if (field === 'Title') continue;
+				if (!VALID_TOKEN_SEGMENT.test(field)) continue;
 				out.push({
 					label: `{{vc:${profileId}/${entry.path}#${field}}}`,
 					displayLabel: `${profileName}/${entry.path}#${field}`,

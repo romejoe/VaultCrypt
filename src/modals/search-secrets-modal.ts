@@ -1,6 +1,7 @@
 import {App, Editor, FuzzyMatch, FuzzySuggestModal} from 'obsidian';
 import type VaultCryptPlugin from '../main';
 import type {DbTreeNode} from '../unlock-session';
+import {VALID_TOKEN_SEGMENT} from '../inline-parser';
 
 interface SearchItem {
 	profileId: string;
@@ -39,8 +40,9 @@ export class SearchSecretsModal extends FuzzySuggestModal<SearchItem> {
 			// Entry-level item (uses the profile's default field)
 			items.push({profileId, profileName, entryPath: entry.path, fieldName: null});
 
-			// One item per non-Title field
+			// One item per non-Title, token-safe field
 			for (const field of displayFields) {
+				if (!VALID_TOKEN_SEGMENT.test(field)) continue;
 				items.push({profileId, profileName, entryPath: entry.path, fieldName: field});
 			}
 		}

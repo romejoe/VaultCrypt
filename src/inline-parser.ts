@@ -1,5 +1,8 @@
 export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:#([a-zA-Z0-9_-]+))?}}/g;
 
+/** Matches a single valid token segment (profile id, path part, or field name). */
+export const VALID_TOKEN_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
 export interface ParsedVcToken {
 	raw: string;
 	profileId: string;
