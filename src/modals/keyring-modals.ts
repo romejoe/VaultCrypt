@@ -2,6 +2,7 @@ import {App, ButtonComponent, Modal, Notice, Setting} from 'obsidian';
 import VaultCryptPlugin, {VaultCryptState} from '../main';
 import {VaultCryptSettings} from '../settings';
 import {peek} from '@maverick-js/signals';
+import {CredentialCacheService} from '../credential-cache-service';
 
 export class SetupKeyringModal extends Modal {
 	private plugin: VaultCryptPlugin;
@@ -117,15 +118,19 @@ export class SetupKeyringModal extends Modal {
 export class KeyringUnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private password = "";
+	private rememberPassword = false;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 	private onDone: (() => void) | undefined;
+	private credentialCache: CredentialCacheService | undefined;
 
 	constructor(app: App, plugin: VaultCryptPlugin, onDone?: () => void) {
 		super(app);
 		this.plugin = plugin;
 		this.onDone = onDone;
+		this.credentialCache = plugin.credentialCache;
+		this.rememberPassword = plugin.settings.security.autoUnlockAll;
 	}
 
 	onOpen() {
@@ -139,11 +144,13 @@ export class KeyringUnlockModal extends Modal {
 			text: `Enter your keyring master password to unlock ${managedLockedCount} profile${managedLockedCount !== 1 ? 's' : ''}.`,
 		});
 
+		let passwordInputEl: HTMLInputElement;
 		new Setting(contentEl)
 			.setName("Master password")
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
+				passwordInputEl = text.inputEl;
 				text.setPlaceholder("Enter keyring master password")
 					.onChange(value => {
 						this.password = value;
@@ -152,6 +159,24 @@ export class KeyringUnlockModal extends Modal {
 					if (evt.key === "Enter") void this.submit();
 				});
 			});
+
+		new Setting(contentEl)
+			.setName("Remember password")
+			.setDesc("Save this password for automatic unlock on startup")
+			.addToggle(toggle => toggle
+				.setValue(this.rememberPassword)
+				.onChange(value => {
+					this.rememberPassword = value;
+				}));
+
+		// Auto-fill from cached password
+		if (this.credentialCache) {
+			const cached = this.credentialCache.getKeyringPassword();
+			if (cached) {
+				this.password = cached;
+				passwordInputEl!.value = cached;
+			}
+		}
 
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});
 		this.errorEl.addClass("vaultcrypt-hidden");
@@ -211,6 +236,15 @@ export class KeyringUnlockModal extends Modal {
 			const unlocked = passwords.size - failures.length;
 			if (unlocked > 0) {
 				new Notice(`Unlocked ${unlocked} profile${unlocked !== 1 ? 's' : ''} via keyring.`);
+			}
+
+			// Save or clear cached keyring password
+			if (this.credentialCache) {
+				if (this.rememberPassword) {
+					this.credentialCache.saveKeyringPassword(this.password);
+				} else {
+					this.credentialCache.clearKeyringPassword();
+				}
 			}
 
 			this.close();
@@ -581,6 +615,8 @@ export class ChangeKeyringPasswordModal extends Modal {
 				this.currentPassword,
 				this.newPassword,
 			);
+			// Clear the cached keyring password since it's now stale
+			this.plugin.credentialCache?.clearKeyringPassword();
 			new Notice("Keyring password changed successfully.");
 			this.close();
 			this.onDone();
@@ -672,6 +708,9 @@ export class DeleteKeyringModal extends Modal {
 
 			// Delete the file
 			await this.plugin.keyringService.deleteKeyring(this.plugin.settings.masterKeyringPath);
+
+			// Clear all cached passwords (keyring + any profile passwords cached via keyring flow)
+			this.plugin.credentialCache?.clearAll();
 
 			// Reset settings
 			this.plugin.patchSettings((s: VaultCryptSettings) => {

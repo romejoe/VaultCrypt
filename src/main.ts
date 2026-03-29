@@ -4,6 +4,7 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {KeyringService} from './keyring-service';
+import {CredentialCacheService} from './credential-cache-service';
 import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
@@ -79,6 +80,7 @@ export default class VaultCryptPlugin extends Plugin {
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
 	keyringService!: KeyringService;
+	credentialCache!: CredentialCacheService;
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
@@ -94,6 +96,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
 		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
 		this.keyringService = new KeyringService(this.app.vault.adapter);
+		this.credentialCache = new CredentialCacheService(this.app.secretStorage);
 		this.profileService = new ProfileService(
 			this.settings$,
 			this.app.vault.adapter,
@@ -112,6 +115,9 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Ensure the .vaultcrypt directory exists
 		await this.profileService.ensureVaultCryptDir();
+
+		// Auto-unlock profiles with cached passwords
+		await this.performAutoUnlock();
 
 		// Wire session events → sync runtime state + update UI
 		this.sessionService.onUnlock(id => {
@@ -443,10 +449,13 @@ export default class VaultCryptPlugin extends Plugin {
 			newSettings.keyringEnabled = false;
 		}
 
-		// Migrate: ensure managedByKeyring exists on all profiles
+		// Migrate: ensure managedByKeyring and autoUnlock exist on all profiles
 		for (const config of Object.values(newSettings.profiles)) {
 			if ((config as ProfileConfig & {managedByKeyring?: boolean}).managedByKeyring === undefined) {
 				config.managedByKeyring = false;
+			}
+			if ((config as ProfileConfig & {autoUnlock?: boolean}).autoUnlock === undefined) {
+				config.autoUnlock = false;
 			}
 		}
 
@@ -548,6 +557,71 @@ export default class VaultCryptPlugin extends Plugin {
 		new UnlockModal(this.app, this, next, () => {
 			this.unlockNextLocked(rest);
 		}).open();
+	}
+
+	/**
+	 * Attempts to auto-unlock profiles using cached passwords from SecretStorage.
+	 * Runs silently — failures are logged but never prompt the user.
+	 */
+	private async performAutoUnlock(): Promise<void> {
+		const settings = this.settings;
+		const profiles = settings.profiles;
+		const autoAll = settings.security.autoUnlockAll;
+
+		// Determine which profiles should auto-unlock
+		const targetIds = Object.entries(profiles)
+			.filter(([, cfg]) => autoAll || cfg.autoUnlock)
+			.map(([id]) => id);
+
+		if (targetIds.length === 0) return;
+
+		// If keyring is enabled and we have a cached keyring password, try keyring unlock first
+		const keyringManagedIds = targetIds.filter(id => profiles[id]?.managedByKeyring);
+		const nonKeyringIds = targetIds.filter(id => !profiles[id]?.managedByKeyring);
+		let keyringHandledIds = new Set<string>();
+
+		if (settings.keyringEnabled && keyringManagedIds.length > 0) {
+			const cachedKeyringPw = this.credentialCache.getKeyringPassword();
+			if (cachedKeyringPw) {
+				try {
+					const passwords = await this.keyringService.getProfilePasswords(
+						settings.masterKeyringPath,
+						cachedKeyringPw,
+						keyringManagedIds,
+					);
+					for (const [profileId, profilePassword] of passwords) {
+						const config = profiles[profileId];
+						if (!config) continue;
+						try {
+							await this.sessionService.unlockProfile(profileId, config, profilePassword);
+							keyringHandledIds.add(profileId);
+							console.debug(`[VaultCrypt] Auto-unlocked "${profileId}" via keyring`);
+						} catch {
+							console.debug(`[VaultCrypt] Auto-unlock failed for "${profileId}" (stale keyring entry)`);
+						}
+					}
+				} catch {
+					console.debug('[VaultCrypt] Auto-unlock: cached keyring password is stale, clearing');
+					this.credentialCache.clearKeyringPassword();
+				}
+			}
+		}
+
+		// Try individual cached passwords for remaining profiles
+		const remaining = [...nonKeyringIds, ...keyringManagedIds.filter(id => !keyringHandledIds.has(id))];
+		for (const profileId of remaining) {
+			const cachedPw = this.credentialCache.getProfilePassword(profileId);
+			if (!cachedPw) continue;
+			const config = profiles[profileId];
+			if (!config) continue;
+			try {
+				await this.sessionService.unlockProfile(profileId, config, cachedPw);
+				console.debug(`[VaultCrypt] Auto-unlocked "${profileId}" via cached password`);
+			} catch {
+				console.debug(`[VaultCrypt] Auto-unlock failed for "${profileId}" (stale cached password), clearing`);
+				this.credentialCache.clearProfilePassword(profileId);
+			}
+		}
 	}
 
 	// ── UI helpers ────────────────────────────────────────────────────────────

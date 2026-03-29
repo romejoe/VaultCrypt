@@ -1,11 +1,13 @@
 import {App, ButtonComponent, Modal, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
+import {CredentialCacheService} from '../credential-cache-service';
 
 export class UnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private selectedProfileId: string;
 	private password = "";
 	private useKeyring = false;
+	private rememberPassword = false;
 	private keyringToggleSetting: Setting | null = null;
 	private passwordSetting!: Setting;
 	private passwordInputEl!: HTMLInputElement;
@@ -13,6 +15,7 @@ export class UnlockModal extends Modal {
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
 	private onDone: ((profileId: string) => void) | undefined;
+	private credentialCache: CredentialCacheService | undefined;
 
 	constructor(
 		app: App,
@@ -23,6 +26,7 @@ export class UnlockModal extends Modal {
 		super(app);
 		this.plugin = plugin;
 		this.onDone = onDone;
+		this.credentialCache = plugin.credentialCache;
 		// Pre-select provided profile, first locked profile, or first profile
 		const profiles = plugin.settings.profiles;
 		const lockedIds = Object.keys(profiles).filter(
@@ -98,6 +102,23 @@ export class UnlockModal extends Modal {
 				});
 			});
 
+
+		// "Remember password" toggle
+		this.rememberPassword = this.plugin.settings.security.autoUnlockAll ||
+			(this.plugin.settings.profiles[this.selectedProfileId]?.autoUnlock ?? false);
+
+		new Setting(contentEl)
+			.setName("Remember password")
+			.setDesc("Save this password for automatic unlock on startup")
+			.addToggle(toggle => toggle
+				.setValue(this.rememberPassword)
+				.onChange(value => {
+					this.rememberPassword = value;
+				}));
+
+		// Auto-fill from cached password
+		this.tryAutoFillPassword();
+
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});
 		this.errorEl.addClass("vaultcrypt-hidden");
 
@@ -137,6 +158,17 @@ export class UnlockModal extends Modal {
 	private clearPassword() {
 		this.password = "";
 		this.passwordInputEl.value = "";
+	}
+
+	private tryAutoFillPassword() {
+		if (!this.credentialCache) return;
+		const cached = this.useKeyring
+			? this.credentialCache.getKeyringPassword()
+			: this.credentialCache.getProfilePassword(this.selectedProfileId);
+		if (cached) {
+			this.password = cached;
+			this.passwordInputEl.value = cached;
+		}
 	}
 
 	private showError(msg: string) {
@@ -198,6 +230,23 @@ export class UnlockModal extends Modal {
 			} else {
 				await this.plugin.sessionService.unlockProfile(profileId, config, submittedPassword);
 			}
+			// Save or clear cached password based on "Remember" toggle
+			if (this.credentialCache) {
+				if (this.rememberPassword) {
+					if (useKeyring) {
+						this.credentialCache.saveKeyringPassword(submittedPassword);
+					} else {
+						this.credentialCache.saveProfilePassword(profileId, submittedPassword);
+					}
+				} else {
+					if (useKeyring) {
+						this.credentialCache.clearKeyringPassword();
+					} else {
+						this.credentialCache.clearProfilePassword(profileId);
+					}
+				}
+			}
+
 			this.close();
 			this.onDone?.(profileId);
 		} catch (e) {

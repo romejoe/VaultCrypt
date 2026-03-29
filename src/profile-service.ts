@@ -63,6 +63,7 @@ export class ProfileService {
 				autoLockMinutes: 0,
 				defaultField: 'password',
 				managedByKeyring: false,
+				autoUnlock: false,
 			};
 		});
 		await this.writeConfigFile();

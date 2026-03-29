@@ -13,6 +13,7 @@ export interface ProfileConfig {
 	autoLockMinutes: number;
 	defaultField: string;
 	managedByKeyring: boolean;
+	autoUnlock: boolean;
 }
 
 export interface VaultCryptSettings {
@@ -22,6 +23,7 @@ export interface VaultCryptSettings {
 	security: {
 		autoLockTimeout: number;
 		clipboardClearSeconds: number;
+		autoUnlockAll: boolean;
 	};
 	general: {
 		vaultCryptDir: string;
@@ -38,7 +40,8 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 	keyringEnabled: false,
 	security: {
 		autoLockTimeout: 300,
-		clipboardClearSeconds: 30
+		clipboardClearSeconds: 30,
+		autoUnlockAll: false,
 	},
 	general: {
 		vaultCryptDir: ".vaultcrypt",
@@ -145,6 +148,38 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 
 		// Security section
 		new Setting(containerEl).setName("Security").setHeading();
+
+		new Setting(containerEl)
+			.setName('Auto-unlock all profiles')
+			.setDesc('Automatically unlock all profiles on startup using saved passwords. Anyone who can open Obsidian will have access to your secrets.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.security.autoUnlockAll)
+				.onChange((value) => {
+					this.plugin.patchSettings(s => {
+						s.security.autoUnlockAll = value;
+					});
+					if (!value) {
+						this.plugin.credentialCache.clearAll();
+					}
+					this.display();
+				}));
+
+		new Setting(containerEl)
+			.setName('Clear all saved passwords')
+			.setDesc('Remove all cached passwords from secure storage')
+			.addButton(btn => btn
+				.setButtonText('Clear')
+				.setWarning()
+				.onClick(() => {
+					this.plugin.credentialCache.clearAll();
+					this.plugin.patchSettings(s => {
+						s.security.autoUnlockAll = false;
+						for (const config of Object.values(s.profiles)) {
+							config.autoUnlock = false;
+						}
+					});
+					this.display();
+				}));
 
 		new Setting(containerEl)
 			.setName('Auto-lock timeout (seconds)')

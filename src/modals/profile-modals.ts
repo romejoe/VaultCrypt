@@ -198,6 +198,7 @@ export class EditProfileModal extends Modal {
 	private config: ProfileConfig;
 	private autoLockMinutes: number;
 	private defaultField: string;
+	private autoUnlock: boolean;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
@@ -210,6 +211,7 @@ export class EditProfileModal extends Modal {
 		this.onDone = onDone;
 		this.autoLockMinutes = config.autoLockMinutes;
 		this.defaultField = config.defaultField;
+		this.autoUnlock = config.autoUnlock;
 	}
 
 	onOpen() {
@@ -240,6 +242,21 @@ export class EditProfileModal extends Modal {
 					this.defaultField = value.trim() || 'Password';
 				}));
 
+		const autoUnlockAllEnabled = this.plugin.settings.security.autoUnlockAll;
+		new Setting(contentEl)
+			.setName("Auto-unlock")
+			.setDesc(autoUnlockAllEnabled
+				? 'Overridden by the global "Auto-unlock all profiles" setting'
+				: 'Automatically unlock this profile on startup using a saved password')
+			.addToggle(toggle => {
+				toggle
+					.setValue(autoUnlockAllEnabled || this.autoUnlock)
+					.setDisabled(autoUnlockAllEnabled)
+					.onChange(value => {
+						this.autoUnlock = value;
+					});
+			});
+
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});
 		this.errorEl.addClass("vaultcrypt-hidden");
 
@@ -263,6 +280,20 @@ export class EditProfileModal extends Modal {
 				autoLockMinutes: this.autoLockMinutes,
 				defaultField: this.defaultField,
 			});
+
+			// Update autoUnlock separately (it's a direct settings patch, not a profile-service concern)
+			const profileId = this.profileName.toLowerCase();
+			const prevAutoUnlock = this.config.autoUnlock;
+			if (this.autoUnlock !== prevAutoUnlock) {
+				this.plugin.patchSettings(s => {
+					const profile = s.profiles[profileId];
+					if (profile) profile.autoUnlock = this.autoUnlock;
+				});
+				// If turning off, clear the cached password
+				if (!this.autoUnlock) {
+					this.plugin.credentialCache.clearProfilePassword(profileId);
+				}
+			}
 			this.close();
 			this.onDone();
 		} catch (e) {
@@ -380,6 +411,13 @@ export class RenameProfileModal extends Modal {
 			}
 			try {
 				await this.plugin.renameProfile(this.currentName, this.newName);
+
+				// Migrate cached password from old to new profile ID
+				const cachedPw = this.plugin.credentialCache.getProfilePassword(normalizedCurrentName);
+				if (cachedPw) {
+					this.plugin.credentialCache.saveProfilePassword(normalizedNewName, cachedPw);
+					this.plugin.credentialCache.clearProfilePassword(normalizedCurrentName);
+				}
 			} catch (e) {
 				if (this.isManagedByKeyring) {
 					try {
@@ -484,6 +522,9 @@ export class DeleteProfileModal extends Modal {
 		try {
 			// Delete profile first so a failure doesn't leave us without a keyring entry
 			await this.plugin.deleteProfile(this.profileName, this.deleteFile);
+
+			// Clear cached password for this profile
+			this.plugin.credentialCache.clearProfilePassword(this.profileName.toLowerCase());
 
 			// Clean up keyring entry after successful deletion; log but don't
 			// fail if the keyring removal itself errors
