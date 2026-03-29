@@ -6,7 +6,8 @@ interface SearchItem {
 	profileId: string;
 	profileName: string;
 	entryPath: string;
-	fieldNames: string[];
+	/** null → uses profile's default field; otherwise a specific field reference. */
+	fieldName: string | null;
 }
 
 export class SearchSecretsModal extends FuzzySuggestModal<SearchItem> {
@@ -33,7 +34,15 @@ export class SearchSecretsModal extends FuzzySuggestModal<SearchItem> {
 	private flattenTree(node: DbTreeNode, profileId: string, profileName: string, items: SearchItem[]): void {
 		for (const entry of node.entries) {
 			const fieldNames = this.plugin.sessionService.getEntryFieldNames(profileId, entry.path) ?? [];
-			items.push({profileId, profileName, entryPath: entry.path, fieldNames});
+			const displayFields = fieldNames.filter(f => f !== 'Title');
+
+			// Entry-level item (uses the profile's default field)
+			items.push({profileId, profileName, entryPath: entry.path, fieldName: null});
+
+			// One item per non-Title field
+			for (const field of displayFields) {
+				items.push({profileId, profileName, entryPath: entry.path, fieldName: field});
+			}
 		}
 		for (const group of node.groups) {
 			this.flattenTree(group, profileId, profileName, items);
@@ -41,27 +50,30 @@ export class SearchSecretsModal extends FuzzySuggestModal<SearchItem> {
 	}
 
 	getItemText(item: SearchItem): string {
-		const displayFields = item.fieldNames.filter(f => f !== 'Title');
-		return `${item.profileName} ${item.entryPath} ${displayFields.join(' ')}`;
+		const suffix = item.fieldName ? `#${item.fieldName}` : '';
+		return `${item.profileName} ${item.entryPath}${suffix}`;
 	}
 
 	renderSuggestion(match: FuzzyMatch<SearchItem>, el: HTMLElement): void {
-		const {profileName, entryPath, fieldNames} = match.item;
-		const entryName = entryPath.split('/').pop() ?? entryPath;
-		const displayFields = fieldNames.filter(f => f !== 'Title');
+		const {profileName, entryPath, fieldName} = match.item;
+		const suffix = fieldName ? `#${fieldName}` : '';
 
-		el.createDiv({cls: 'vc-search-title', text: entryName});
-		el.createDiv({cls: 'vc-search-path', text: entryPath});
+		el.createDiv({cls: 'vc-search-path', text: `${entryPath}${suffix}`});
 
 		const metaEl = el.createDiv({cls: 'vc-search-meta'});
 		metaEl.createSpan({cls: 'vc-search-profile', text: profileName});
-		if (displayFields.length > 0) {
-			metaEl.createSpan({cls: 'vc-search-fields', text: displayFields.join(', ')});
-		}
 	}
 
 	onChooseItem(item: SearchItem): void {
-		const token = `{{vc:${item.profileId}/${item.entryPath}}}`;
+		const fieldSuffix = item.fieldName ? `#${item.fieldName}` : '';
+
+		// If }} already follows the cursor, omit them from the inserted token.
+		const cursor = this.editor.getCursor();
+		const lineText = this.editor.getLine(cursor.line);
+		const hasClosingBraces = lineText.slice(cursor.ch).startsWith('}}');
+		const closing = hasClosingBraces ? '' : '}}';
+
+		const token = `{{vc:${item.profileId}/${item.entryPath}${fieldSuffix}${closing}`;
 		this.editor.replaceSelection(token);
 	}
 }

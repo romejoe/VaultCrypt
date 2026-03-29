@@ -76,23 +76,41 @@ function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): Decoratio
 	return builder.finish();
 }
 
-function flattenTreeToCompletions(node: DbTreeNode, profileId: string, profileName: string, out: Completion[]): void {
+function flattenTreeToCompletions(
+	node: DbTreeNode, profileId: string, profileName: string,
+	plugin: VaultCryptPlugin, out: Completion[],
+): void {
 	for (const entry of node.entries) {
+		// Entry-level completion (uses the profile's default field)
 		out.push({
 			label: `{{vc:${profileId}/${entry.path}}}`,
 			displayLabel: entry.path,
 			detail: profileName,
 			type: 'variable',
 		});
+
+		// Field-level completions
+		const fieldNames = plugin.sessionService.getEntryFieldNames(profileId, entry.path);
+		if (fieldNames) {
+			for (const field of fieldNames) {
+				if (field === 'Title') continue;
+				out.push({
+					label: `{{vc:${profileId}/${entry.path}#${field}}}`,
+					displayLabel: `${entry.path}#${field}`,
+					detail: profileName,
+					type: 'property',
+				});
+			}
+		}
 	}
 	for (const group of node.groups) {
-		flattenTreeToCompletions(group, profileId, profileName, out);
+		flattenTreeToCompletions(group, profileId, profileName, plugin, out);
 	}
 }
 
 function vcCompletionSource(plugin: VaultCryptPlugin) {
 	return (context: CompletionContext): CompletionResult | null => {
-		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_\-/]*/);
+		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_\-/]*(?:#[a-zA-Z0-9_-]*)?\w*/);
 		if (!before || (before.from === before.to && !context.explicit)) return null;
 
 		const options: Completion[] = [];
@@ -100,15 +118,21 @@ function vcCompletionSource(plugin: VaultCryptPlugin) {
 		for (const profile of unlockedProfiles) {
 			const tree = plugin.sessionService.getEntryTree(profile.id);
 			if (!tree) continue;
-			flattenTreeToCompletions(tree, profile.id, profile.name, options);
+			flattenTreeToCompletions(tree, profile.id, profile.name, plugin, options);
 		}
 
 		if (options.length === 0) return null;
 
+		// If }} already exists after the cursor, extend the replacement range to
+		// cover them so we don't end up with duplicate closing braces.
+		const afterCursor = context.state.doc.sliceString(context.pos, context.pos + 2);
+		const to = afterCursor === '}}' ? context.pos + 2 : undefined;
+
 		return {
 			from: before.from,
+			to,
 			options,
-			validFor: /^\{\{vc:[a-zA-Z0-9_\-/]*/,
+			validFor: /^\{\{vc:[a-zA-Z0-9_\-/]*(?:#[a-zA-Z0-9_-]*)?\w*/,
 		};
 	};
 }
