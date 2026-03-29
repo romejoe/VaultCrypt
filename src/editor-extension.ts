@@ -1,10 +1,12 @@
 import {editorLivePreviewField} from 'obsidian';
 import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType} from '@codemirror/view';
 import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
+import {autocompletion, Completion, CompletionContext, CompletionResult} from '@codemirror/autocomplete';
 import {parseVcTokens, ParsedVcToken} from './inline-parser';
 import {buildChipElement, CHIP_DESTROY_EVENT} from './chip-component';
 import {buildCopyTextFromEditorSelection} from './clipboard-intercept';
 import type VaultCryptPlugin from './main';
+import type {DbTreeNode} from './unlock-session';
 
 /** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
 export const refreshChipsEffect = StateEffect.define<void>();
@@ -74,6 +76,43 @@ function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): Decoratio
 	return builder.finish();
 }
 
+function flattenTreeToCompletions(node: DbTreeNode, profileId: string, profileName: string, out: Completion[]): void {
+	for (const entry of node.entries) {
+		out.push({
+			label: `{{vc:${profileId}/${entry.path}}}`,
+			displayLabel: entry.path,
+			detail: profileName,
+			type: 'variable',
+		});
+	}
+	for (const group of node.groups) {
+		flattenTreeToCompletions(group, profileId, profileName, out);
+	}
+}
+
+function vcCompletionSource(plugin: VaultCryptPlugin) {
+	return (context: CompletionContext): CompletionResult | null => {
+		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_\-/]*/);
+		if (!before || (before.from === before.to && !context.explicit)) return null;
+
+		const options: Completion[] = [];
+		const unlockedProfiles = plugin.vaultCryptState.profiles.filter(p => !p.isLocked);
+		for (const profile of unlockedProfiles) {
+			const tree = plugin.sessionService.getEntryTree(profile.id);
+			if (!tree) continue;
+			flattenTreeToCompletions(tree, profile.id, profile.name, options);
+		}
+
+		if (options.length === 0) return null;
+
+		return {
+			from: before.from,
+			options,
+			validFor: /^\{\{vc:[a-zA-Z0-9_\-/]*/,
+		};
+	};
+}
+
 export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 	const viewPlugin = ViewPlugin.fromClass(
 		class {
@@ -106,5 +145,5 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 		},
 	});
 
-	return [viewPlugin, copyHandler];
+	return [viewPlugin, copyHandler, autocompletion({override: [vcCompletionSource(plugin)]})];
 }

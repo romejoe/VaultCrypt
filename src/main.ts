@@ -4,7 +4,7 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {KeyringService} from './keyring-service';
-import {UnlockModal, KeyringUnlockModal, InsertSecretModal} from './modals';
+import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
@@ -282,6 +282,14 @@ export default class VaultCryptPlugin extends Plugin {
 			name: 'Insert secret',
 			editorCallback: (editor: Editor) => {
 				new InsertSecretModal(this.app, this, editor).open();
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-search-secrets',
+			name: 'Search secrets',
+			editorCallback: (editor: Editor) => {
+				new SearchSecretsModal(this.app, this, editor).open();
 			}
 		});
 

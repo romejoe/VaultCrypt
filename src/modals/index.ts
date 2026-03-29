@@ -8,3 +8,4 @@ export {InsertSecretModal} from './insert-secret-modal';
 export {EditSecretModal} from './edit-secret-modal';
 export {DeleteSecretModal} from './delete-secret-modal';
 export {GeneratePasswordModal} from './generate-password-modal';
+export {SearchSecretsModal} from './search-secrets-modal';
