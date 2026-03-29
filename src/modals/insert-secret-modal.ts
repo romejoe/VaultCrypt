@@ -301,7 +301,12 @@ export class InsertSecretModal extends Modal {
 							}}
 							@blur=${(e: FocusEvent) => {
 								const input = e.target as HTMLInputElement;
-								window.setTimeout(() => this.confirmInlineGroupCreate(input.value.trim(), node.path), 100);
+								const valueTrimmed = input.value.trim();
+								window.setTimeout(() => {
+									if (this.inlineGroupCreatePath === node.path) {
+										this.confirmInlineGroupCreate(valueTrimmed, node.path);
+									}
+								}, 100);
 							}}>
 					</li>
 				`

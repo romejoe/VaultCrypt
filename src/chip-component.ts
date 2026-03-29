@@ -365,6 +365,8 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		if (showSaved && editBtnRef.value) {
 			const btn = editBtnRef.value;
 			setTimeout(() => {
+				// Verify button is still in DOM before updating
+				if (!btn.isConnected) return;
 				btn.textContent = '✏️';
 				btn.className = 'vaultcrypt-chip-btn';
 			}, 1500);
