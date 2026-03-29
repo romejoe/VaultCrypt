@@ -283,7 +283,7 @@ export class InsertSecretModal extends Modal {
 				? html`
 					<li class="vaultcrypt-tree-new-entry">
 						<input ${ref((el) => {
-								if (el instanceof HTMLInputElement) el.focus();
+								if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus();
 							})}
 							class="vaultcrypt-tree-group-input"
 							type="text"
