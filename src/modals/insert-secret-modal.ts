@@ -172,6 +172,7 @@ export class InsertSecretModal extends Modal {
 	private onProfileChanged(profile: DeepReadonly<VaultCryptProfile> | null) {
 		this.selectedEntryPath = null;
 		this.newEntryGroupPath = null;
+		this.inlineGroupCreatePath = null;
 		this.virtualGroupPaths.clear();
 		this.expandedPaths.clear();
 
@@ -203,6 +204,7 @@ export class InsertSecretModal extends Modal {
 			this.lockedWarningEl.addClass('vaultcrypt-flex');
 			this.selectedEntryPath = null;
 			this.newEntryGroupPath = null;
+			this.inlineGroupCreatePath = null;
 			this.virtualGroupPaths.clear();
 			this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
 		} else {
@@ -238,18 +240,18 @@ export class InsertSecretModal extends Modal {
 			${node.groups.map(childGroup => {
 				const isExpanded = this.expandedPaths.has(childGroup.path);
 				return html`
-					<li role="treeitem">
+					<li role="treeitem"
+						tabindex="0"
+						aria-expanded=${String(isExpanded)}
+						@click=${(e: Event) => this.toggleGroup(e, childGroup.path)}
+						@keydown=${(e: KeyboardEvent) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								this.toggleGroup(e, childGroup.path);
+							}
+						}}>
 						<span class=${'vaultcrypt-tree-caret' + (isExpanded ? ' vaultcrypt-tree-caret-open' : '')}
-							tabindex="0"
-							role="button"
-							aria-expanded=${String(isExpanded)}
-							@click=${(e: Event) => this.toggleGroup(e, childGroup.path)}
-							@keydown=${(e: KeyboardEvent) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									this.toggleGroup(e, childGroup.path);
-								}
-							}}>${childGroup.name || '(unnamed)'}</span>
+							>${childGroup.name || '(unnamed)'}</span>
 						<ul class=${'vaultcrypt-tree-ul vaultcrypt-tree-nested' + (isExpanded ? ' vaultcrypt-tree-active' : '')}
 							role="group">
 							${this.renderGroupChildren(childGroup)}
@@ -271,7 +273,7 @@ export class InsertSecretModal extends Modal {
 			`)}
 			<li class=${'vaultcrypt-tree-new-entry' + (this.newEntryGroupPath === node.path && this.selectedEntryPath === null ? ' is-active' : '')}
 				tabindex="0"
-				role="button"
+				role="treeitem"
 				@click=${() => this.selectNewEntry(node.path)}
 				@keydown=${(e: KeyboardEvent) => {
 					if (e.key === 'Enter' || e.key === ' ') {
@@ -281,7 +283,7 @@ export class InsertSecretModal extends Modal {
 				}}>New entry here</li>
 			${this.inlineGroupCreatePath === node.path
 				? html`
-					<li class="vaultcrypt-tree-new-entry">
+					<li class="vaultcrypt-tree-new-entry" role="treeitem">
 						<input ${ref((el) => {
 								if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus();
 							})}
@@ -313,7 +315,7 @@ export class InsertSecretModal extends Modal {
 				: html`
 					<li class="vaultcrypt-tree-new-entry"
 						tabindex="0"
-						role="button"
+						role="treeitem"
 						@click=${(e: Event) => {
 							e.stopPropagation();
 							this.startInlineGroupCreate(node.path);
@@ -723,6 +725,7 @@ export class InsertSecretModal extends Modal {
 
 	onClose() {
 		this.isOpen = false;
+		this.inlineGroupCreatePath = null;
 		for (const stop of this.effects) stop();
 		this.stopLockEffect?.();
 		this.contentEl.empty();
