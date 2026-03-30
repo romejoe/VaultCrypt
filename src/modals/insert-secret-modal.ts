@@ -263,10 +263,14 @@ export class InsertSecretModal extends Modal {
 				<li class=${'vaultcrypt-tree-entry' + (this.selectedEntryPath === entry.path ? ' is-active' : '')}
 					tabindex="0"
 					role="treeitem"
-					@click=${() => this.selectEntry(entry.path)}
+					@click=${(e: Event) => {
+						e.stopPropagation();
+						this.selectEntry(entry.path);
+					}}
 					@keydown=${(e: KeyboardEvent) => {
 						if (e.key === 'Enter' || e.key === ' ') {
 							e.preventDefault();
+							e.stopPropagation();
 							this.selectEntry(entry.path);
 						}
 					}}>${entry.name || '(untitled)'}</li>
@@ -274,16 +278,21 @@ export class InsertSecretModal extends Modal {
 			<li class=${'vaultcrypt-tree-new-entry' + (this.newEntryGroupPath === node.path && this.selectedEntryPath === null ? ' is-active' : '')}
 				tabindex="0"
 				role="treeitem"
-				@click=${() => this.selectNewEntry(node.path)}
+				@click=${(e: Event) => {
+					e.stopPropagation();
+					this.selectNewEntry(node.path);
+				}}
 				@keydown=${(e: KeyboardEvent) => {
 					if (e.key === 'Enter' || e.key === ' ') {
 						e.preventDefault();
+						e.stopPropagation();
 						this.selectNewEntry(node.path);
 					}
 				}}>New entry here</li>
 			${this.inlineGroupCreatePath === node.path
 				? html`
-					<li class="vaultcrypt-tree-new-entry" role="treeitem">
+					<li class="vaultcrypt-tree-new-entry" role="treeitem"
+						@click=${(e: Event) => e.stopPropagation()}>
 						<input ${ref((el) => {
 								if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus();
 							})}
@@ -359,6 +368,11 @@ export class InsertSecretModal extends Modal {
 
 	private toggleGroup(e: Event, path: string) {
 		e.stopPropagation();
+		// Only toggle when the click/key originated on the <li> itself or its
+		// direct caret <span>, not on a descendant entry/action that bubbled up.
+		const li = e.currentTarget as HTMLElement;
+		const target = e.target as HTMLElement;
+		if (target !== li && target.parentElement !== li) return;
 		if (this.expandedPaths.has(path)) {
 			this.expandedPaths.delete(path);
 		} else {
