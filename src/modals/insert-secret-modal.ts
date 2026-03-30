@@ -55,6 +55,7 @@ export class InsertSecretModal extends Modal {
 	private virtualGroupPaths = new Set<string>();
 	private expandedPaths = new Set<string>();
 	private inlineGroupCreatePath: string | null = null;
+	private inlineGroupCreateSession = 0;
 	private entryNameErrorEl!: HTMLElement;
 	private effects: StopEffect[] = [];
 	selectedProfile$: ReadSignal<DeepReadonly<VaultCryptProfile> | null>;
@@ -313,8 +314,9 @@ export class InsertSecretModal extends Modal {
 							@blur=${(e: FocusEvent) => {
 								const input = e.target as HTMLInputElement;
 								const valueTrimmed = input.value.trim();
+								const session = this.inlineGroupCreateSession;
 								window.setTimeout(() => {
-									if (this.inlineGroupCreatePath === node.path) {
+									if (this.inlineGroupCreatePath === node.path && this.inlineGroupCreateSession === session) {
 										this.confirmInlineGroupCreate(valueTrimmed, node.path);
 									}
 								}, 100);
@@ -369,10 +371,10 @@ export class InsertSecretModal extends Modal {
 	private toggleGroup(e: Event, path: string) {
 		e.stopPropagation();
 		// Only toggle when the click/key originated on the <li> itself or its
-		// direct caret <span>, not on a descendant entry/action that bubbled up.
+		// direct caret <span>, not on descendants (nested <ul>, entries, etc.).
 		const li = e.currentTarget as HTMLElement;
 		const target = e.target as HTMLElement;
-		if (target !== li && target.parentElement !== li) return;
+		if (target !== li && !(target.tagName === 'SPAN' && target.classList.contains('vaultcrypt-tree-caret'))) return;
 		if (this.expandedPaths.has(path)) {
 			this.expandedPaths.delete(path);
 		} else {
@@ -382,11 +384,13 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private startInlineGroupCreate(parentPath: string) {
+		this.inlineGroupCreateSession++;
 		this.inlineGroupCreatePath = parentPath;
 		this.renderTree();
 	}
 
 	private confirmInlineGroupCreate(name: string, parentPath: string) {
+		this.inlineGroupCreateSession++;
 		this.inlineGroupCreatePath = null;
 		if (name && VALID_PATH_SEGMENT.test(name)) {
 			this.addVirtualGroup(parentPath, name);
@@ -399,6 +403,7 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private cancelInlineGroupCreate() {
+		this.inlineGroupCreateSession++;
 		this.inlineGroupCreatePath = null;
 		this.renderTree();
 	}
