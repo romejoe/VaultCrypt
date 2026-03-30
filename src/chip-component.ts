@@ -3,6 +3,8 @@ import {UnlockModal, EditSecretModal, DeleteSecretModal} from './modals';
 import {ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
+import {html, render, nothing} from 'lit-html';
+import {ref, createRef} from 'lit-html/directives/ref.js';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
@@ -79,7 +81,7 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		}
 	};
 
-	root.addEventListener(CHIP_DESTROY_EVENT, (evt) => {
+	root.addEventListener(CHIP_DESTROY_EVENT, () => {
 		cleanupPopover();
 		for (const effect of effects) {
 			effect?.();
@@ -256,109 +258,73 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		}),
 	];
 
-	// ── Inner render functions — each clears root's children then repopulates ──
+	// ── Inner render functions — each renders a lit-html template into root ──
 
 	function renderUnknown() {
 		if (!peek(profileConfig)) {
 			root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
 			root.dataset.vcCopyText = '[unknown]';
-			root.textContent = `⚠ unknown profile: ${token.profileId}`;
+			render(html`⚠ unknown profile: ${token.profileId}`, root);
 		}
 	}
 
 	function renderLocked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
 		root.dataset.vcCopyText = '[locked]';
-		root.replaceChildren();
-		const label = document.createElement('span');
-		label.textContent = compact() ? '🔒 ••••••••' : `🔒 ${tooltipPath()}`;
-		label.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			new UnlockModal(plugin.app, plugin, profileId, () => {
-				chipState.set('masked');
-			}).open();
-		});
-
-		root.appendChild(label);
+		render(html`
+			<span @click=${(evt: MouseEvent) => {
+				evt.stopPropagation();
+				new UnlockModal(plugin.app, plugin, profileId, () => {
+					chipState.set('masked');
+				}).open();
+			}}>${compact() ? '🔒 ••••••••' : `🔒 ${tooltipPath()}`}</span>
+		`, root);
 	}
 
 	function renderMasked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
 		root.dataset.vcCopyText = '[encrypted]';
-		root.replaceChildren();
-
-		const iconEl = document.createElement('span');
-		iconEl.textContent = '🔒';
-		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-locked';
-
-		iconEl.addEventListener('click', (evt) => {
+		const onReveal = (evt: MouseEvent) => {
 			evt.stopPropagation();
 			chipState.set('revealed');
-		});
-
-		const dotsEl = document.createElement('span');
-		dotsEl.className = 'vaultcrypt-chip-dots';
-		dotsEl.textContent = '••••••••';
-
-		dotsEl.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			chipState.set('revealed');
-		});
-
-		const copyBtn = makeButton('📋', 'Copy to clipboard');
-		copyBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			copyField(profileId, token.entryPath, peek(field), plugin);
-		});
-
-		root.appendChild(iconEl);
-		root.appendChild(dotsEl);
-		root.appendChild(copyBtn);
+		};
+		render(html`
+			<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-locked"
+				@click=${onReveal}>🔒</span>
+			<span class="vaultcrypt-chip-dots"
+				@click=${onReveal}>••••••••</span>
+			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					copyField(profileId, token.entryPath, peek(field), plugin);
+				}}>📋</button>
+		`, root);
 	}
 
 	function renderMaskedError(reason: string) {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
 		root.dataset.vcCopyText = '[encrypted]';
-		root.replaceChildren();
-
-		const iconEl = document.createElement('span');
-		iconEl.textContent = '⚠';
-		iconEl.className = 'vaultcrypt-chip-icon';
-
-		const labelEl = document.createElement('span');
-		labelEl.textContent = reason;
-
-		const editBtn = makeButton('✏️', 'Create and edit');
-		editBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			startEditing();
-		});
-
-		const retryBtn = makeButton('🔄', 'Retry');
-		retryBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			chipState.set('masked');
-		});
-
-		root.appendChild(iconEl);
-		root.appendChild(labelEl);
-		if (!compact()) root.appendChild(editBtn);
-		root.appendChild(retryBtn);
+		render(html`
+			<span class="vaultcrypt-chip-icon">⚠</span>
+			<span>${reason}</span>
+			${!compact() ? html`
+				<button class="vaultcrypt-chip-btn" title="Create and edit"
+					@click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						startEditing();
+					}}>✏️</button>
+			` : nothing}
+			<button class="vaultcrypt-chip-btn" title="Retry"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					chipState.set('masked');
+				}}>🔄</button>
+		`, root);
 	}
 
 	function renderRevealed(value: string) {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-revealed';
 		root.dataset.vcCopyText = value;
-		root.replaceChildren();
-
-		const iconEl = document.createElement('span');
-		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
-		iconEl.textContent = '🔓';
-		iconEl.title = 'Click to mask';
-		iconEl.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			chipState.set('masked');
-		});
 
 		const MAX_DISPLAY = 40;
 		const firstNonEmpty = value.split('\n').find(l => l.trim() !== '') ?? '';
@@ -366,38 +332,45 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		const isTruncated = display.length < value.length || value.includes('\n');
 		if (isTruncated) display += '…';
 
-		const valueEl = document.createElement('span');
-		valueEl.className = 'vaultcrypt-chip-value';
-		valueEl.textContent = display;
-		if (isTruncated) valueEl.title = value;
+		const showSaved = peek(justSaved);
+		if (showSaved) justSaved.set(false);
 
-		const editBtn = makeButton('✏️', 'Edit');
-		editBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			startEditing();
-		});
+		const editBtnRef = createRef<HTMLButtonElement>();
 
-		// Show save confirmation checkmark briefly after a successful save
-		if (peek(justSaved)) {
-			justSaved.set(false);
-			editBtn.textContent = '✅';
-			editBtn.className = 'vaultcrypt-chip-btn vaultcrypt-chip-btn-saved';
+		render(html`
+			<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked"
+				title="Click to mask"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					chipState.set('masked');
+				}}>🔓</span>
+			<span class="vaultcrypt-chip-value"
+				title=${isTruncated ? value : nothing}>${display}</span>
+			${!compact() ? html`
+				<button ${ref(editBtnRef)}
+					class=${showSaved ? 'vaultcrypt-chip-btn vaultcrypt-chip-btn-saved' : 'vaultcrypt-chip-btn'}
+					title="Edit"
+					@click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						startEditing();
+					}}>${showSaved ? '✅' : '✏️'}</button>
+			` : nothing}
+			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					copyField(profileId, token.entryPath, peek(field), plugin);
+				}}>📋</button>
+		`, root);
+
+		if (showSaved && editBtnRef.value) {
+			const btn = editBtnRef.value;
 			setTimeout(() => {
-				editBtn.textContent = '✏️';
-				editBtn.className = 'vaultcrypt-chip-btn';
+				// Verify button is still in DOM before updating
+				if (!btn.isConnected) return;
+				btn.textContent = '✏️';
+				btn.className = 'vaultcrypt-chip-btn';
 			}, 1500);
 		}
-
-		const copyBtn = makeButton('📋', 'Copy to clipboard');
-		copyBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			copyField(profileId, token.entryPath, peek(field), plugin);
-		});
-
-		root.appendChild(iconEl);
-		root.appendChild(valueEl);
-		if (!compact()) root.appendChild(editBtn);
-		root.appendChild(copyBtn);
 	}
 
 	// ── Inline editing (single-line) ─────────────────────────────────────────
@@ -406,82 +379,76 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		cleanupPopover();
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
 		root.dataset.vcCopyText = value;
-		root.replaceChildren();
 
-		const iconEl = document.createElement('span');
-		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
-		iconEl.textContent = '🔓';
-		iconEl.title = 'Click to mask (cancels edit)';
-		iconEl.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			editState.set(null);
-			chipState.set('masked');
-		});
-
-		const input = document.createElement('input');
-		input.type = 'text';
-		input.className = 'vaultcrypt-chip-input';
-		input.value = value;
-		input.size = Math.max(value.length, 8);
-
+		const inputRef = createRef<HTMLInputElement>();
 		let saving = false;
 
-		input.addEventListener('input', () => {
-			input.size = Math.max(input.value.length, 8);
-		});
-
-		input.addEventListener('keydown', (evt) => {
-			evt.stopPropagation();
-			if (evt.key === 'Enter') {
-				evt.preventDefault();
-				saving = true;
-				void saveEdit(input.value).then((saved) => {
-					saving = false;
-					if (saved) editState.set(null);
-				});
-			} else if (evt.key === 'Escape') {
-				evt.preventDefault();
-				editState.set(null);
-			}
-		});
-
-		input.addEventListener('blur', (evt) => {
-			if (saving) return;
-			// If editState was already cleared (e.g. by Escape) or changed (mode switch), skip
-			if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
-			// If focus moved to another element inside the chip (e.g. Tab to expand button), keep editing
-			if (evt.relatedTarget instanceof Node && root.contains(evt.relatedTarget)) return;
-			if (peek(saveOnBlur)) {
-				void saveEdit(input.value).then((saved) => {
-					if (saved) editState.set(null);
-				});
-			} else {
-				editState.set(null);
-			}
-		});
-
-		// Stop click propagation so CodeMirror doesn't steal focus
-		input.addEventListener('click', (evt) => evt.stopPropagation());
-		input.addEventListener('mousedown', (evt) => evt.stopPropagation());
-
-		const expandBtn = makeButton('⤢', 'Expand to multi-line');
-		// preventDefault on mousedown stops the input from losing focus before click fires
-		expandBtn.addEventListener('mousedown', (evt) => {
-			evt.preventDefault();
-			evt.stopPropagation();
-		});
-		expandBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			editState.set({mode: 'multiline', value: input.value});
-		});
-
-		root.appendChild(iconEl);
-		root.appendChild(input);
-		root.appendChild(expandBtn);
+		render(html`
+			<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked"
+				title="Click to mask (cancels edit)"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					editState.set(null);
+					chipState.set('masked');
+				}}>🔓</span>
+			<input ${ref(inputRef)}
+				type="text"
+				class="vaultcrypt-chip-input"
+				.value=${value}
+				size=${Math.max(value.length, 8)}
+				@input=${() => {
+					const input = inputRef.value;
+					if (input) input.size = Math.max(input.value.length, 8);
+				}}
+				@keydown=${(evt: KeyboardEvent) => {
+					evt.stopPropagation();
+					const input = inputRef.value;
+					if (!input) return;
+					if (evt.key === 'Enter') {
+						evt.preventDefault();
+						saving = true;
+						void saveEdit(input.value).then((saved) => {
+							saving = false;
+							if (saved) editState.set(null);
+						});
+					} else if (evt.key === 'Escape') {
+						evt.preventDefault();
+						editState.set(null);
+					}
+				}}
+				@blur=${(evt: FocusEvent) => {
+					const input = inputRef.value;
+					if (!input || saving) return;
+					if (peek(editState) === null || peek(editState)?.mode !== 'inline') return;
+					if (evt.relatedTarget instanceof Node && root.contains(evt.relatedTarget)) return;
+					if (peek(saveOnBlur)) {
+						void saveEdit(input.value).then((saved) => {
+							if (saved) editState.set(null);
+						});
+					} else {
+						editState.set(null);
+					}
+				}}
+				@click=${(evt: MouseEvent) => evt.stopPropagation()}
+				@mousedown=${(evt: MouseEvent) => evt.stopPropagation()}>
+			<button class="vaultcrypt-chip-btn" title="Expand to multi-line"
+				@mousedown=${(evt: MouseEvent) => {
+					evt.preventDefault();
+					evt.stopPropagation();
+				}}
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					const input = inputRef.value;
+					if (input) editState.set({mode: 'multiline', value: input.value});
+				}}>⤢</button>
+		`, root);
 
 		requestAnimationFrame(() => {
-			input.focus();
-			input.select();
+			const input = inputRef.value;
+			if (input) {
+				input.focus();
+				input.select();
+			}
 		});
 	}
 
@@ -491,84 +458,78 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		cleanupPopover();
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-editing';
 		root.dataset.vcCopyText = value;
-		root.replaceChildren();
 
-		const iconEl = document.createElement('span');
-		iconEl.className = 'vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked';
-		iconEl.textContent = '🔓';
+		render(html`
+			<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked">🔓</span>
+			<span class="vaultcrypt-chip-value">editing\u2026</span>
+		`, root);
 
-		const labelEl = document.createElement('span');
-		labelEl.className = 'vaultcrypt-chip-value';
-
-		// eslint-disable-next-line obsidianmd/ui/sentence-case
-		labelEl.textContent = 'editing\u2026';
-
-		root.appendChild(iconEl);
-		root.appendChild(labelEl);
-
-		// Create popover
+		// Create and position popover (appended to document.body for z-index)
 		const popover = document.createElement('div');
 		popover.className = 'vaultcrypt-edit-popover';
 
-		const textarea = document.createElement('textarea');
-		textarea.value = value;
-		textarea.rows = Math.min(Math.max(value.split('\n').length, 3), 12);
+		const textareaRef = createRef<HTMLTextAreaElement>();
+		const collapseBtnRef = createRef<HTMLButtonElement>();
 
-		const btnBar = document.createElement('div');
-		btnBar.className = 'vaultcrypt-edit-popover-buttons';
-
-		const saveBtn = document.createElement('button');
-		saveBtn.textContent = 'Save';
-		saveBtn.className = 'mod-cta';
-		saveBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			void saveEdit(textarea.value).then((saved) => {
-				if (saved) editState.set(null);
-			});
-		});
-
-		const collapseBtn = document.createElement('button');
-		// eslint-disable-next-line obsidianmd/ui/sentence-case
-		collapseBtn.textContent = '⤡ Single-line';
-		collapseBtn.title = 'Collapse to single-line input';
-		// Disable when content has multiple lines
-		collapseBtn.disabled = textarea.value.includes('\n');
-		collapseBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			if (collapseBtn.disabled) return;
-			editState.set({mode: 'inline', value: textarea.value});
-		});
-
-		const cancelBtn = document.createElement('button');
-		cancelBtn.textContent = 'Cancel';
-		cancelBtn.addEventListener('click', (evt) => {
-			evt.stopPropagation();
-			editState.set(null);
-		});
-
-		textarea.addEventListener('input', () => {
-			collapseBtn.disabled = textarea.value.includes('\n');
-		});
-
-		textarea.addEventListener('keydown', (evt) => {
-			evt.stopPropagation();
-			if (evt.key === 'Escape') {
-				evt.preventDefault();
-				editState.set(null);
-			} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
-				evt.preventDefault();
-				void saveEdit(textarea.value).then((saved) => {
-					if (saved) editState.set(null);
-				});
-			}
-		});
+		render(html`
+			<textarea ${ref(textareaRef)}
+				.value=${value}
+				rows=${Math.min(Math.max(value.split('\n').length, 3), 12)}
+				@input=${() => {
+					const textarea = textareaRef.value;
+					const collapseBtn = collapseBtnRef.value;
+					if (textarea && collapseBtn) {
+						collapseBtn.disabled = textarea.value.includes('\n');
+					}
+				}}
+				@keydown=${(evt: KeyboardEvent) => {
+					evt.stopPropagation();
+					const textarea = textareaRef.value;
+					if (!textarea) return;
+					if (evt.key === 'Escape') {
+						evt.preventDefault();
+						editState.set(null);
+					} else if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
+						evt.preventDefault();
+						void saveEdit(textarea.value).then((saved) => {
+							if (saved) editState.set(null);
+						});
+					}
+				}}></textarea>
+			<div class="vaultcrypt-edit-popover-buttons">
+				<button ${ref(collapseBtnRef)}
+					title="Collapse to single-line input"
+					?disabled=${value.includes('\n')}
+					@click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						const collapseBtn = collapseBtnRef.value;
+						const textarea = textareaRef.value;
+						if (collapseBtn?.disabled || !textarea) return;
+						editState.set({mode: 'inline', value: textarea.value});
+					}}>⤡ Single-line</button>
+				<button @click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					editState.set(null);
+				}}>Cancel</button>
+				<button class="mod-cta"
+					@click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						const textarea = textareaRef.value;
+						if (!textarea) return;
+						void saveEdit(textarea.value).then((saved) => {
+							if (saved) editState.set(null);
+						});
+					}}>Save</button>
+			</div>
+		`, popover);
 
 		// Click outside popover → save or discard based on setting
 		function onClickOutside(evt: MouseEvent) {
 			const target = evt.target as Node;
 			if (!popover.contains(target) && !root.contains(target)) {
 				document.removeEventListener('mousedown', onClickOutside, true);
-				if (peek(saveOnBlur)) {
+				const textarea = textareaRef.value;
+				if (peek(saveOnBlur) && textarea) {
 					void saveEdit(textarea.value).then((saved) => {
 						if (saved) editState.set(null);
 					});
@@ -582,12 +543,6 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		requestAnimationFrame(() => {
 			document.addEventListener('mousedown', onClickOutside, true);
 		});
-
-		btnBar.appendChild(collapseBtn);
-		btnBar.appendChild(cancelBtn);
-		btnBar.appendChild(saveBtn);
-		popover.appendChild(textarea);
-		popover.appendChild(btnBar);
 
 		// Position below the chip, clamped to viewport
 		document.body.appendChild(popover);
@@ -619,8 +574,11 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 		};
 
 		requestAnimationFrame(() => {
-			textarea.focus();
-			textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+			const textarea = textareaRef.value;
+			if (textarea) {
+				textarea.focus();
+				textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+			}
 		});
 	}
 
@@ -654,14 +612,6 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 }
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
-
-function makeButton(emoji: string, title: string): HTMLButtonElement {
-	const btn = document.createElement('button');
-	btn.className = 'vaultcrypt-chip-btn';
-	btn.textContent = emoji;
-	btn.title = title;
-	return btn;
-}
 
 function copyField(
 	profileId: string,

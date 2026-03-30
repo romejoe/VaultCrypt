@@ -5,6 +5,8 @@ import {computed, effect, peek, ReadSignal, signal, StopEffect} from '@maverick-
 import {UnlockModal} from './unlock-modal';
 import {GeneratePasswordModal} from './generate-password-modal';
 import {DeepReadonly} from "../utils";
+import {html, render, nothing, TemplateResult} from 'lit-html';
+import {ref} from 'lit-html/directives/ref.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,8 @@ export class InsertSecretModal extends Modal {
 	private stopLockEffect?: StopEffect;
 	private virtualGroupPaths = new Set<string>();
 	private expandedPaths = new Set<string>();
+	private inlineGroupCreatePath: string | null = null;
+	private inlineGroupCreateSession = 0;
 	private entryNameErrorEl!: HTMLElement;
 	private effects: StopEffect[] = [];
 	selectedProfile$: ReadSignal<DeepReadonly<VaultCryptProfile> | null>;
@@ -169,6 +173,7 @@ export class InsertSecretModal extends Modal {
 	private onProfileChanged(profile: DeepReadonly<VaultCryptProfile> | null) {
 		this.selectedEntryPath = null;
 		this.newEntryGroupPath = null;
+		this.inlineGroupCreatePath = null;
 		this.virtualGroupPaths.clear();
 		this.expandedPaths.clear();
 
@@ -200,6 +205,7 @@ export class InsertSecretModal extends Modal {
 			this.lockedWarningEl.addClass('vaultcrypt-flex');
 			this.selectedEntryPath = null;
 			this.newEntryGroupPath = null;
+			this.inlineGroupCreatePath = null;
 			this.virtualGroupPaths.clear();
 			this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
 		} else {
@@ -212,22 +218,128 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private renderTree() {
-		this.treeContainerEl.empty();
 		const locked = !this.plugin.sessionService.isUnlocked(peek(this.selectedProfileId$));
 		if (locked) {
-			this.treeContainerEl.createEl('p', {
-				cls: 'setting-item-description',
-				text: 'Unlock the profile to browse the database.',
-			});
+			render(html`<p class="setting-item-description">Unlock the profile to browse the database.</p>`, this.treeContainerEl);
 			return;
 		}
 		const rawTree = this.plugin.sessionService.getEntryTree(peek(this.selectedProfileId$));
-		if (!rawTree) return;
+		if (!rawTree) {
+			render(nothing, this.treeContainerEl);
+			return;
+		}
 		const tree = this.augmentTreeWithVirtualGroups(rawTree);
-		const ul = this.buildGroupUl(tree);
-		ul.addClass('vaultcrypt-tree-root');
-		ul.setAttribute('role', 'tree');
-		this.treeContainerEl.appendChild(ul);
+		render(html`
+			<ul class="vaultcrypt-tree-ul vaultcrypt-tree-root" role="tree">
+				${this.renderGroupChildren(tree)}
+			</ul>
+		`, this.treeContainerEl);
+	}
+
+	private renderGroupChildren(node: DbTreeNode): TemplateResult {
+		return html`
+			${node.groups.map(childGroup => {
+				const isExpanded = this.expandedPaths.has(childGroup.path);
+				return html`
+					<li role="treeitem"
+						tabindex="0"
+						aria-expanded=${String(isExpanded)}
+						@click=${(e: Event) => this.toggleGroup(e, childGroup.path)}
+						@keydown=${(e: KeyboardEvent) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								this.toggleGroup(e, childGroup.path);
+							}
+						}}>
+						<span class=${'vaultcrypt-tree-caret' + (isExpanded ? ' vaultcrypt-tree-caret-open' : '')}
+							>${childGroup.name || '(unnamed)'}</span>
+						<ul class=${'vaultcrypt-tree-ul vaultcrypt-tree-nested' + (isExpanded ? ' vaultcrypt-tree-active' : '')}
+							role="group">
+							${this.renderGroupChildren(childGroup)}
+						</ul>
+					</li>
+				`;
+			})}
+			${node.entries.map(entry => html`
+				<li class=${'vaultcrypt-tree-entry' + (this.selectedEntryPath === entry.path ? ' is-active' : '')}
+					tabindex="0"
+					role="treeitem"
+					@click=${(e: Event) => {
+						e.stopPropagation();
+						this.selectEntry(entry.path);
+					}}
+					@keydown=${(e: KeyboardEvent) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							e.stopPropagation();
+							this.selectEntry(entry.path);
+						}
+					}}>${entry.name || '(untitled)'}</li>
+			`)}
+			<li class=${'vaultcrypt-tree-new-entry' + (this.newEntryGroupPath === node.path && this.selectedEntryPath === null ? ' is-active' : '')}
+				tabindex="0"
+				role="treeitem"
+				@click=${(e: Event) => {
+					e.stopPropagation();
+					this.selectNewEntry(node.path);
+				}}
+				@keydown=${(e: KeyboardEvent) => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						e.stopPropagation();
+						this.selectNewEntry(node.path);
+					}
+				}}>New entry here</li>
+			${this.inlineGroupCreatePath === node.path
+				? html`
+					<li class="vaultcrypt-tree-new-entry" role="treeitem"
+						@click=${(e: Event) => e.stopPropagation()}>
+						<input ${ref((el) => {
+								if (el instanceof HTMLInputElement && document.activeElement !== el) el.focus();
+							})}
+							class="vaultcrypt-tree-group-input"
+							type="text"
+							placeholder="Group name"
+							@keydown=${(e: KeyboardEvent) => {
+								const input = e.target as HTMLInputElement;
+								if (e.key === 'Enter') {
+									e.stopPropagation();
+									this.confirmInlineGroupCreate(input.value.trim(), node.path);
+								}
+								if (e.key === 'Escape') {
+									e.stopPropagation();
+									this.cancelInlineGroupCreate();
+								}
+							}}
+							@blur=${(e: FocusEvent) => {
+								const input = e.target as HTMLInputElement;
+								const valueTrimmed = input.value.trim();
+								const session = this.inlineGroupCreateSession;
+								window.setTimeout(() => {
+									if (this.inlineGroupCreatePath === node.path && this.inlineGroupCreateSession === session) {
+										this.confirmInlineGroupCreate(valueTrimmed, node.path);
+									}
+								}, 100);
+							}}>
+					</li>
+				`
+				: html`
+					<li class="vaultcrypt-tree-new-entry"
+						tabindex="0"
+						role="treeitem"
+						@click=${(e: Event) => {
+							e.stopPropagation();
+							this.startInlineGroupCreate(node.path);
+						}}
+						@keydown=${(e: KeyboardEvent) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								e.stopPropagation();
+								this.startInlineGroupCreate(node.path);
+							}
+						}}>New group here</li>
+				`}
+		`;
 	}
 
 	private augmentTreeWithVirtualGroups(root: DbTreeNode): DbTreeNode {
@@ -256,120 +368,48 @@ export class InsertSecretModal extends Modal {
 		return cloned;
 	}
 
-	private buildGroupUl(node: DbTreeNode): HTMLUListElement {
-		const ul = document.createElement('ul');
-		ul.addClass('vaultcrypt-tree-ul');
-		ul.setAttribute('role', 'group');
-
-		for (const childGroup of node.groups) {
-			const li = ul.createEl('li');
-			li.setAttribute('role', 'treeitem');
-			const isExpanded = this.expandedPaths.has(childGroup.path);
-			const caretCls = 'vaultcrypt-tree-caret' + (isExpanded ? ' vaultcrypt-tree-caret-open' : '');
-			const caret = li.createEl('span', {cls: caretCls, text: childGroup.name || '(unnamed)'});
-			caret.tabIndex = 0;
-			caret.setAttribute('role', 'button');
-			caret.setAttribute('aria-expanded', String(isExpanded));
-			const nestedCls = 'vaultcrypt-tree-ul vaultcrypt-tree-nested' + (isExpanded ? ' vaultcrypt-tree-active' : '');
-			const nested = li.createEl('ul', {cls: nestedCls});
-			nested.setAttribute('role', 'group');
-
-			const childUl = this.buildGroupUl(childGroup);
-			for (const child of Array.from(childUl.children)) {
-				nested.appendChild(child);
-			}
-
-			const toggleCaret = (e: Event) => {
-				e.stopPropagation();
-				const nowOpen = caret.classList.toggle('vaultcrypt-tree-caret-open');
-				nested.classList.toggle('vaultcrypt-tree-active', nowOpen);
-				caret.setAttribute('aria-expanded', String(nowOpen));
-				if (nowOpen) this.expandedPaths.add(childGroup.path);
-				else this.expandedPaths.delete(childGroup.path);
-			};
-			caret.addEventListener('click', toggleCaret);
-			caret.addEventListener('keydown', (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					toggleCaret(e);
-				}
-			});
-			li.appendChild(nested);
+	private toggleGroup(e: Event, path: string) {
+		e.stopPropagation();
+		// Only toggle when the click/key originated on the <li> itself or its
+		// direct caret <span>, not on descendants (nested <ul>, entries, etc.).
+		const li = e.currentTarget as HTMLElement;
+		const target = e.target as HTMLElement;
+		if (target !== li && !(target.tagName === 'SPAN' && target.classList.contains('vaultcrypt-tree-caret'))) return;
+		if (this.expandedPaths.has(path)) {
+			this.expandedPaths.delete(path);
+		} else {
+			this.expandedPaths.add(path);
 		}
-
-		for (const entry of node.entries) {
-			const li = ul.createEl('li', {cls: 'vaultcrypt-tree-entry', text: entry.name || '(untitled)'});
-			li.tabIndex = 0;
-			li.setAttribute('role', 'treeitem');
-			li.addEventListener('click', () => this.selectEntry(entry.path, li));
-			li.addEventListener('keydown', (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					this.selectEntry(entry.path, li);
-				}
-			});
-		}
-
-		const newEntryLi = ul.createEl('li', {cls: 'vaultcrypt-tree-new-entry', text: 'New entry here'});
-		newEntryLi.tabIndex = 0;
-		newEntryLi.setAttribute('role', 'button');
-		newEntryLi.addEventListener('click', () => this.selectNewEntry(node.path, newEntryLi));
-		newEntryLi.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				this.selectNewEntry(node.path, newEntryLi);
-			}
-		});
-
-		const newGroupLi = ul.createEl('li', {cls: 'vaultcrypt-tree-new-entry', text: 'New group here'});
-		newGroupLi.tabIndex = 0;
-		newGroupLi.setAttribute('role', 'button');
-		newGroupLi.addEventListener('click', (e) => {
-			e.stopPropagation();
-			this.startInlineGroupCreate(newGroupLi, node.path);
-		});
-		newGroupLi.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				e.stopPropagation();
-				this.startInlineGroupCreate(newGroupLi, node.path);
-			}
-		});
-
-		return ul;
+		this.renderTree();
 	}
 
-	private startInlineGroupCreate(li: HTMLElement, parentPath: string) {
-		li.empty();
-		const input = li.createEl('input', {cls: 'vaultcrypt-tree-group-input'});
-		input.type = 'text';
-		input.placeholder = 'Group name';
-		input.focus();
+	private startInlineGroupCreate(parentPath: string) {
+		this.inlineGroupCreateSession++;
+		this.inlineGroupCreatePath = parentPath;
+		this.selectedEntryPath = null;
+		this.newEntryGroupPath = null;
+		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
+		this.renderTree();
+		this.updateInsertButtonState();
+	}
 
-		const restore = () => {
-			li.empty();
-			li.textContent = 'New group here';
-		};
-		const confirm = () => {
-			const name = input.value.trim();
-			if (name && VALID_PATH_SEGMENT.test(name)) this.addVirtualGroup(parentPath, name);
-			else if (name) {
-				new Notice('Group name can only contain letters, digits, hyphens, and underscores');
-				restore();
-			} else restore();
-		};
-		input.addEventListener('keydown', (e: KeyboardEvent) => {
-			if (e.key === 'Enter') {
-				e.stopPropagation();
-				confirm();
-			}
-			if (e.key === 'Escape') {
-				e.stopPropagation();
-				restore();
-			}
-		});
-		// defer blur so Enter/Escape fire first
-		input.addEventListener('blur', () => window.setTimeout(confirm, 100));
+	private confirmInlineGroupCreate(name: string, parentPath: string) {
+		this.inlineGroupCreateSession++;
+		this.inlineGroupCreatePath = null;
+		if (name && VALID_PATH_SEGMENT.test(name)) {
+			this.addVirtualGroup(parentPath, name);
+		} else if (name) {
+			new Notice('Group name can only contain letters, digits, hyphens, and underscores');
+			this.renderTree();
+		} else {
+			this.renderTree();
+		}
+	}
+
+	private cancelInlineGroupCreate() {
+		this.inlineGroupCreateSession++;
+		this.inlineGroupCreatePath = null;
+		this.renderTree();
 	}
 
 	private addVirtualGroup(parentPath: string, name: string) {
@@ -380,26 +420,22 @@ export class InsertSecretModal extends Modal {
 		this.renderTree();
 	}
 
-	private clearTreeSelections() {
-		this.treeContainerEl.querySelectorAll<HTMLElement>('.is-active').forEach(el => el.removeClass('is-active'));
-	}
-
-	private selectEntry(entryPath: string, clickedEl: HTMLElement) {
-		this.clearTreeSelections();
-		clickedEl.addClass('is-active');
+	private selectEntry(entryPath: string) {
+		this.cancelInlineGroupCreate();
 		this.selectedEntryPath = entryPath;
 		this.newEntryGroupPath = null;
 		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
+		this.renderTree();
 		this.refreshFieldDropdown();
 		this.updateInsertButtonState();
 	}
 
-	private selectNewEntry(groupPath: string, clickedEl: HTMLElement) {
-		this.clearTreeSelections();
-		clickedEl.addClass('is-active');
+	private selectNewEntry(groupPath: string) {
+		this.cancelInlineGroupCreate();
 		this.newEntryGroupPath = groupPath;
 		this.selectedEntryPath = null;
 		this.entryFieldsSectionEl.removeClass('vaultcrypt-hidden');
+		this.renderTree();
 		this.refreshFieldDropdown();
 		this.updateInsertButtonState();
 	}
@@ -714,6 +750,7 @@ export class InsertSecretModal extends Modal {
 
 	onClose() {
 		this.isOpen = false;
+		this.inlineGroupCreatePath = null;
 		for (const stop of this.effects) stop();
 		this.stopLockEffect?.();
 		this.contentEl.empty();
