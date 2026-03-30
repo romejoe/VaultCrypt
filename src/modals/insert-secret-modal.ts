@@ -386,7 +386,11 @@ export class InsertSecretModal extends Modal {
 	private startInlineGroupCreate(parentPath: string) {
 		this.inlineGroupCreateSession++;
 		this.inlineGroupCreatePath = parentPath;
+		this.selectedEntryPath = null;
+		this.newEntryGroupPath = null;
+		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
 		this.renderTree();
+		this.updateInsertButtonState();
 	}
 
 	private confirmInlineGroupCreate(name: string, parentPath: string) {
