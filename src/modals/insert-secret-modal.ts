@@ -417,6 +417,7 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private selectEntry(entryPath: string) {
+		this.cancelInlineGroupCreate();
 		this.selectedEntryPath = entryPath;
 		this.newEntryGroupPath = null;
 		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
@@ -426,6 +427,7 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private selectNewEntry(groupPath: string) {
+		this.cancelInlineGroupCreate();
 		this.newEntryGroupPath = groupPath;
 		this.selectedEntryPath = null;
 		this.entryFieldsSectionEl.removeClass('vaultcrypt-hidden');
