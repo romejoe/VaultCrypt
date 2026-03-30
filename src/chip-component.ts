@@ -8,6 +8,8 @@ import {ref, createRef} from 'lit-html/directives/ref.js';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
+const ATTACHMENT_PREFIX = 'attachment:';
+
 /** Editing sub-state: mode + in-progress value, or null when not editing. */
 interface EditState {
 	mode: 'inline' | 'multiline';
@@ -30,7 +32,17 @@ interface EditState {
  *                        ↓ on getFieldValue null
  *                       masked-error chip (verbose reason, retry button)
  */
+/**
+ * Dispatcher: routes to the attachment chip or the secret-value chip based on the token's field name.
+ */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+	if (token.fieldName?.startsWith(ATTACHMENT_PREFIX)) {
+		return buildAttachmentChipElement(token, plugin);
+	}
+	return buildSecretChipElement(token, plugin);
+}
+
+function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
 	let effects: StopEffect[] = [];
 	const profileConfig = computed(() => {
@@ -607,6 +619,156 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 			return false;
 		}
 	}
+
+	return root;
+}
+
+// ── Attachment chip ───────────────────────────────────────────────────────────
+
+/**
+ * Builds a file chip for `{{vc:profileId/path#attachment:filename}}` tokens.
+ *
+ * State machine:
+ *   unknown profile  →  error chip (static)
+ *   profile locked   →  locked chip (click to unlock)
+ *   profile unlocked →  ready chip (📎 filename [💾] [📋]) or missing chip (⚠ not found)
+ */
+function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+	const profileId = token.profileId.toLowerCase();
+	const filename = token.fieldName!.slice(ATTACHMENT_PREFIX.length);
+	let effects: StopEffect[] = [];
+
+	const profileConfig = computed(() => plugin.settings$().profiles[profileId]);
+	const compact = computed(() => plugin.settings$().general.compactChips);
+
+	const root = document.createElement('span');
+	root.dataset.vcChip = '';
+	root.title = `${profileId}/${token.entryPath}#${token.fieldName}`;
+
+	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
+
+	root.addEventListener(CHIP_DESTROY_EVENT, () => {
+		for (const stop of effects) stop?.();
+	});
+
+	root.addEventListener('contextmenu', (evt) => {
+		evt.preventDefault();
+		evt.stopPropagation();
+		const menu = new Menu();
+		menu.addItem(item => item
+			.setTitle('Copy reference')
+			.setIcon('copy')
+			.onClick(() => {
+				navigator.clipboard.writeText(token.raw).then(
+					() => new Notice('Reference copied to clipboard'),
+					() => new Notice('Failed to copy reference'),
+				);
+			}));
+		menu.showAtMouseEvent(evt);
+	});
+
+	function renderUnknown() {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
+		render(html`⚠ unknown profile: ${token.profileId}`, root);
+	}
+
+	function renderLocked() {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
+		render(html`
+			<span @click=${(evt: MouseEvent) => {
+				evt.stopPropagation();
+				new UnlockModal(plugin.app, plugin, profileId, () => {
+					chipState.set('ready');
+				}).open();
+			}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</span>
+		`, root);
+	}
+
+	function renderReady() {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-file';
+		render(html`
+			<span class="vaultcrypt-chip-icon">📎</span>
+			<span class="vaultcrypt-chip-value">${filename}</span>
+			<button class="vaultcrypt-chip-btn" title="Save to vault"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					void saveAttachment();
+				}}>💾</button>
+			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					copyAttachment();
+				}}>📋</button>
+		`, root);
+	}
+
+	function renderMissing() {
+		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
+		render(html`
+			<span class="vaultcrypt-chip-icon">⚠</span>
+			<span>Attachment not found: ${filename}</span>
+		`, root);
+	}
+
+	async function saveAttachment(): Promise<void> {
+		const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
+		if (!data) {
+			new Notice('Could not read attachment — is the profile still unlocked?');
+			return;
+		}
+		try {
+			const savePath = `.vaultcrypt/attachments/${filename}`;
+			const adapter = plugin.app.vault.adapter;
+			// Ensure directory exists
+			try { await adapter.mkdir('.vaultcrypt/attachments'); } catch { /* already exists */ }
+			await adapter.writeBinary(savePath, data);
+			new Notice(`Saved to vault: ${savePath}`);
+		} catch (err) {
+			new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	function copyAttachment(): void {
+		const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
+		if (!data) {
+			new Notice('Could not read attachment — is the profile still unlocked?');
+			return;
+		}
+		const text = new TextDecoder().decode(data);
+		const secs = plugin.settings.security.clipboardClearSeconds;
+		navigator.clipboard.writeText(text).then(() => {
+			const msg = secs > 0 ? `Copied to clipboard (clears in ${secs}s)` : 'Copied to clipboard';
+			new Notice(msg, 3000);
+			if (secs > 0) plugin.scheduleClearClipboardTime(text, secs);
+		}).catch(() => new Notice('Failed to copy to clipboard'));
+	}
+
+	effects = [
+		effect(() => {
+			const config = profileConfig();
+			if (!config) {
+				chipState.set('unknown');
+				return;
+			}
+			const profileLocked = plugin.vaultCryptState$().profiles.find(p => p.id === profileId)?.isLocked ?? true;
+			if (profileLocked) {
+				chipState.set('locked');
+				return;
+			}
+			if (peek(chipState) === 'locked' || peek(chipState) === 'unknown') {
+				const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
+				chipState.set(data !== null && data !== undefined ? 'ready' : 'missing');
+			}
+		}),
+
+		effect(() => {
+			const state = chipState();
+			if (state === 'unknown') renderUnknown();
+			else if (state === 'locked') renderLocked();
+			else if (state === 'ready') renderReady();
+			else if (state === 'missing') renderMissing();
+		}),
+	];
 
 	return root;
 }

@@ -274,6 +274,21 @@ export class UnlockSessionService {
 	}
 
 	/**
+	 * Reads a binary attachment from an open profile's entry.
+	 * Returns the ArrayBuffer content, or null if locked / entry not found / attachment not found.
+	 */
+	getAttachment(profileId: string, entryPath: string, filename: string): ArrayBuffer | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		const binary = entry.binaries.get(filename);
+		if (binary === undefined || binary === null) return null;
+		if (binary instanceof kdbxweb.ProtectedValue) return binary.getBinary();
+		return binary as ArrayBuffer;
+	}
+
+	/**
 	 * Returns the field names present on an entry, or null if the profile is locked
 	 * or the entry cannot be found.
 	 */
