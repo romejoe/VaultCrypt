@@ -310,7 +310,7 @@ export class EditSecretModal extends Modal {
 	private triggerFileInput(replacingName?: string): void {
 		const input = document.createElement('input');
 		input.type = 'file';
-		input.style.display = 'none';
+		input.addClass('vaultcrypt-hidden');
 		document.body.appendChild(input);
 		input.addEventListener('change', () => {
 			const file = input.files?.[0];
