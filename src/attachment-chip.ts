@@ -121,7 +121,8 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 		try {
-			const dir = `.vaultcrypt/attachments/${profileId}`;
+			const sanitizedEntry = token.entryPath.replace(/[<>:"|?*]/g, '_');
+			const dir = `.vaultcrypt/attachments/${profileId}/${sanitizedEntry}`;
 			const savePath = `${dir}/${filename}`;
 			const adapter = plugin.app.vault.adapter;
 			try { await adapter.mkdir(dir); } catch { /* already exists */ }
