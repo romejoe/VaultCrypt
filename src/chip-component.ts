@@ -5,11 +5,9 @@ import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {html, render, nothing} from 'lit-html';
 import {ref, createRef} from 'lit-html/directives/ref.js';
-import {buildAttachmentChipElement} from './attachment-chip';
+import {buildAttachmentChipElement, ATTACHMENT_PREFIX} from './attachment-chip';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
-
-const ATTACHMENT_PREFIX = 'attachment:';
 
 /** Editing sub-state: mode + in-progress value, or null when not editing. */
 interface EditState {

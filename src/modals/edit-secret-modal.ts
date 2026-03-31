@@ -2,6 +2,7 @@ import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TFile, 
 import VaultCryptPlugin from '../main';
 import {GeneratePasswordModal} from './generate-password-modal';
 import type {ParsedVcToken} from '../inline-parser';
+import {ATTACHMENT_PREFIX} from '../attachment-chip';
 
 /** Characters allowed in a field name per inline-parser. */
 const VALID_FIELD_NAME = /^[a-zA-Z0-9_-]+$/;
@@ -30,6 +31,13 @@ export class EditSecretModal extends Modal {
 
 	// The file that was active when the modal opened — used for token replacement
 	private sourceFile: TFile | null = null;
+
+	// Attachment state
+	private existingAttachments: { name: string; size: number }[] = [];
+	private toAdd: { filename: string; data: ArrayBuffer; size: number }[] = [];
+	private toRemove = new Set<string>();
+	private attachmentsSectionEl!: HTMLElement;
+	private attachmentInputCleanup?: () => void;
 
 	// DOM refs
 	private customFieldsContainerEl!: HTMLElement;
@@ -76,6 +84,10 @@ export class EditSecretModal extends Modal {
 				this.customFields.push({key, value});
 			}
 		}
+
+		// Load current attachment metadata (name + size)
+		this.existingAttachments =
+			this.plugin.sessionService.getEntryAttachmentMeta(this.profileId, this.entryPath) ?? [];
 
 		// Entry name (read-only)
 		new Setting(contentEl)
@@ -170,6 +182,17 @@ export class EditSecretModal extends Modal {
 					this.refreshFieldDropdown();
 				}));
 
+		// Attachments section
+		contentEl.createEl('hr');
+		contentEl.createEl('p', {cls: 'setting-item-name', text: 'Attachments'});
+		this.attachmentsSectionEl = contentEl.createDiv();
+		this.renderAttachments();
+
+		new Setting(contentEl)
+			.addButton(btn => btn
+				.setButtonText('Add attachment')
+				.onClick(() => this.triggerFileInput()));
+
 		// Reference field dropdown
 		contentEl.createEl('hr');
 
@@ -236,6 +259,112 @@ export class EditSecretModal extends Modal {
 		}
 	}
 
+	private formatAttachmentSize(size: number): string {
+		return `${(size / 1024).toFixed(1)} KB`;
+	}
+
+	private renderAttachments() {
+		this.attachmentsSectionEl.empty();
+		const existingNames = new Set(this.existingAttachments.map(attachment => attachment.name));
+
+		// Existing attachments not queued for removal
+		for (const attachment of this.existingAttachments) {
+			const {name, size} = attachment;
+			if (this.toRemove.has(name)) continue;
+			const replacement = this.toAdd.find(a => a.filename === name);
+			const displaySize = this.formatAttachmentSize(replacement?.size ?? size);
+			const displayName = replacement ? `${name} (${displaySize}) — replaced` : `${name} (${displaySize})`;
+			new Setting(this.attachmentsSectionEl)
+				.setName(displayName)
+				.addButton(btn => btn
+					.setButtonText('Replace')
+					.onClick(() => this.triggerFileInput(name)))
+				.addButton(btn => btn
+					.setButtonText('Remove')
+					.setWarning()
+					.onClick(() => {
+						this.toRemove.add(name);
+						this.toAdd = this.toAdd.filter(a => a.filename !== name);
+						this.renderAttachments();
+						this.refreshFieldDropdown();
+					}));
+		}
+
+		// Pending new additions (filenames not in existingAttachments)
+		for (const pending of this.toAdd) {
+			if (existingNames.has(pending.filename)) continue;
+			const sizeLabel = this.formatAttachmentSize(pending.size);
+			new Setting(this.attachmentsSectionEl)
+				.setName(`${pending.filename} (${sizeLabel}) — pending`)
+				.addButton(btn => btn
+					.setButtonText('\u00d7')
+					.onClick(() => {
+						this.toAdd = this.toAdd.filter(a => a.filename !== pending.filename);
+						this.renderAttachments();
+						this.refreshFieldDropdown();
+					}));
+		}
+
+		// Items queued for removal (with undo)
+		for (const name of this.toRemove) {
+			const existing = this.existingAttachments.find(attachment => attachment.name === name);
+			const sizeLabel = existing ? ` (${this.formatAttachmentSize(existing.size)})` : '';
+			new Setting(this.attachmentsSectionEl)
+				.setName(`${name}${sizeLabel} — will be removed`)
+				.addButton(btn => btn
+					.setButtonText('Undo')
+					.onClick(() => {
+						this.toRemove.delete(name);
+						this.renderAttachments();
+						this.refreshFieldDropdown();
+					}));
+		}
+	}
+
+	private triggerFileInput(replacingName?: string): void {
+		this.attachmentInputCleanup?.();
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.addClass('vaultcrypt-hidden');
+		document.body.appendChild(input);
+
+		const cleanup = () => {
+			input.removeEventListener('change', onChange);
+			input.removeEventListener('cancel', onCancel);
+			input.remove();
+			if (this.attachmentInputCleanup === cleanup) {
+				this.attachmentInputCleanup = undefined;
+			}
+		};
+
+		const onCancel = () => cleanup();
+		const onChange = () => {
+			const file = input.files?.[0];
+			cleanup();
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = reader.result as ArrayBuffer;
+				const filename = replacingName ?? file.name;
+				this.toAdd = this.toAdd.filter(a => a.filename !== filename);
+				this.toAdd.push({filename, data, size: file.size});
+				if (replacingName || this.toRemove.has(filename)) this.toRemove.delete(filename);
+				this.renderAttachments();
+				this.refreshFieldDropdown();
+			};
+			reader.onerror = () => {
+				console.error('[VaultCrypt] EditSecretModal attachment read failed', reader.error);
+				this.showError(`Failed to read file: ${file.name}`);
+			};
+			reader.readAsArrayBuffer(file);
+		};
+
+		this.attachmentInputCleanup = cleanup;
+		input.addEventListener('change', onChange);
+		input.addEventListener('cancel', onCancel);
+		input.click();
+	}
+
 	private refreshFieldDropdown() {
 		const dd = this.fieldRefDropdown;
 		if (!dd) return;
@@ -248,6 +377,15 @@ export class EditSecretModal extends Modal {
 		if (this.fieldNotes) options.push('Notes');
 		for (const cf of this.customFields) {
 			if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+		}
+		for (const attachment of this.existingAttachments) {
+			if (this.toRemove.has(attachment.name)) continue;
+			const fieldName = `${ATTACHMENT_PREFIX}${attachment.name}`;
+			if (!options.includes(fieldName)) options.push(fieldName);
+		}
+		for (const pending of this.toAdd) {
+			const fieldName = `${ATTACHMENT_PREFIX}${pending.filename}`;
+			if (!options.includes(fieldName)) options.push(fieldName);
 		}
 
 		dd.selectEl.empty();
@@ -330,7 +468,32 @@ export class EditSecretModal extends Modal {
 				config.path,
 			);
 
-			// If the reference field changed, update the token in the source file
+			// Apply attachment additions/replacements first, then removals.
+			// Additions first so that a failure doesn't leave deletions already committed.
+			const attachmentErrors: string[] = [];
+			for (const {filename, data} of this.toAdd) {
+				try {
+					await this.plugin.sessionService.setAttachment(
+						this.profileId, this.entryPath, filename, data, config.path,
+					);
+				} catch (e) {
+					attachmentErrors.push(`add "${filename}": ${e instanceof Error ? e.message : String(e)}`);
+				}
+			}
+			for (const filename of this.toRemove) {
+				try {
+					await this.plugin.sessionService.deleteAttachment(
+						this.profileId, this.entryPath, filename, config.path,
+					);
+				} catch (e) {
+					attachmentErrors.push(`remove "${filename}": ${e instanceof Error ? e.message : String(e)}`);
+				}
+			}
+			if (attachmentErrors.length > 0) {
+				new Notice(`Some attachment changes failed:\n${attachmentErrors.join('\n')}`, 8000);
+			}
+
+			// If the reference field changed, update the token in the source file.
 			if (this.referenceField !== this.originalReferenceField) {
 				const newToken = this.buildTokenString();
 				await this.replaceTokenInSourceFile(this.token.raw, newToken);
@@ -362,6 +525,7 @@ export class EditSecretModal extends Modal {
 	}
 
 	onClose() {
+		this.attachmentInputCleanup?.();
 		this.contentEl.empty();
 	}
 }

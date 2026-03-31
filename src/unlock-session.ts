@@ -31,6 +31,15 @@ export interface DbTreeEntry {
  *
  * Note: kdbxweb's Argon2 implementation must be registered globally
  * (done in KdbxService constructor) before unlockProfile() is called.
+ *
+ * Error-handling strategy for mutations:
+ * - {@link setAttachment} and {@link setFieldValue} restore the in-memory
+ *   entry to its previous state on save failure, keeping the session usable.
+ * - {@link deleteAttachment} and {@link deleteEntry} cannot trivially roll
+ *   back, so they call {@link lockProfile} on save failure, forcing a clean
+ *   reload from disk on next unlock.
+ * Callers that mix both (e.g. the edit modal) should apply additions before
+ * deletions so that a failed add does not leave committed deletions behind.
  */
 export class UnlockSessionService {
 	private openDbs = new Map<string, kdbxweb.Kdbx>();
@@ -292,6 +301,112 @@ export class UnlockSessionService {
 		}
 		if (binary instanceof kdbxweb.ProtectedValue) return binary.getBinary();
 		return binary;
+	}
+
+	/**
+	 * Returns the list of attachment names stored on an entry's binaries map,
+	 * or null if the profile is locked or the entry cannot be found.
+	 */
+	getEntryAttachmentNames(profileId: string, entryPath: string): string[] | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		return [...entry.binaries.keys()];
+	}
+
+	/**
+	 * Returns attachment names with their byte sizes, or null if the profile is
+	 * locked or the entry cannot be found.
+	 */
+	getEntryAttachmentMeta(profileId: string, entryPath: string): { name: string; size: number }[] | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		const result: { name: string; size: number }[] = [];
+		for (const [name, binary] of entry.binaries) {
+			let buf: ArrayBuffer | null = null;
+			if (kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(binary)) {
+				const inner = binary.value;
+				buf = inner instanceof kdbxweb.ProtectedValue ? inner.getBinary() : inner;
+			} else if (binary instanceof kdbxweb.ProtectedValue) {
+				buf = binary.getBinary();
+			} else {
+				buf = binary;
+			}
+			result.push({ name, size: buf?.byteLength ?? 0 });
+		}
+		return result;
+	}
+
+	/**
+	 * Adds or replaces a named binary attachment on an entry and saves the database.
+	 * Throws if the profile is locked or the entry does not exist.
+	 */
+	async setAttachment(
+		profileId: string,
+		entryPath: string,
+		filename: string,
+		data: ArrayBuffer,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+
+		const binaryRef = await db.createBinary(data);
+		const oldBinary = entry.binaries.get(filename);
+		entry.binaries.set(filename, binaryRef);
+		entry.times.update();
+
+		try {
+			const buffer = await db.save();
+			await this.adapter.writeBinary(kdbxFilePath, buffer);
+		} catch (err) {
+			// Restore entry to pre-set state and reclaim the pool entry.
+			if (oldBinary !== undefined) {
+				entry.binaries.set(filename, oldBinary);
+			} else {
+				entry.binaries.delete(filename);
+			}
+			db.cleanup({ binaries: true });
+			throw err;
+		}
+	}
+
+	/**
+	 * Removes a named binary attachment from an entry and saves the database.
+	 * Calls db.cleanup({ binaries: true }) before saving to reclaim the pool slot.
+	 * If persistence fails the profile is locked to force a clean reload.
+	 * Throws if the profile is locked or the entry does not exist.
+	 */
+	async deleteAttachment(
+		profileId: string,
+		entryPath: string,
+		filename: string,
+		kdbxFilePath: string,
+	): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+
+		if (!entry.binaries.has(filename)) return; // idempotent
+
+		entry.binaries.delete(filename);
+		entry.times.update();
+		db.cleanup({ binaries: true }); // reclaim unreferenced pool slot before save
+
+		try {
+			const buffer = await db.save();
+			await this.adapter.writeBinary(kdbxFilePath, buffer);
+		} catch (err) {
+			// Cannot trivially roll back; lock to force a clean reload from disk.
+			this.lockProfile(profileId);
+			throw err;
+		}
 	}
 
 	/**

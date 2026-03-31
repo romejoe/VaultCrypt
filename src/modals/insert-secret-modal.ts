@@ -7,6 +7,7 @@ import {GeneratePasswordModal} from './generate-password-modal';
 import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
+import {ATTACHMENT_PREFIX} from '../attachment-chip';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,9 @@ export class InsertSecretModal extends Modal {
 	private userNameTextComponent?: TextComponent;
 	private passwordTextComponent?: TextComponent;
 	private urlTextComponent?: TextComponent;
+	private pendingAttachments: { filename: string; data: ArrayBuffer; size: number }[] = [];
+	private pendingAttachmentsContainerEl!: HTMLElement;
+	private attachmentInputCleanup?: () => void;
 	private isSubmitting = false;
 	private isOpen = false;
 	private stopLockEffect?: StopEffect;
@@ -189,6 +193,8 @@ export class InsertSecretModal extends Modal {
 		this.passwordTextComponent?.setValue('');
 		this.urlTextComponent?.setValue('');
 		this.customFieldsContainerEl?.empty();
+		this.pendingAttachments = [];
+		this.pendingAttachmentsContainerEl?.empty();
 		this.entryNameErrorEl?.addClass('vaultcrypt-hidden');
 
 		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
@@ -529,6 +535,13 @@ export class InsertSecretModal extends Modal {
 					this.renderCustomFields();
 					this.refreshFieldDropdown();
 				}));
+
+		this.pendingAttachmentsContainerEl = container.createDiv();
+
+		new Setting(container)
+			.addButton(btn => btn
+				.setButtonText('Add attachment')
+				.onClick(() => this.triggerAttachmentFileInput()));
 	}
 
 	private renderCustomFields() {
@@ -559,6 +572,69 @@ export class InsertSecretModal extends Modal {
 						this.refreshFieldDropdown();
 					}));
 		}
+	}
+
+	private renderPendingAttachments() {
+		this.pendingAttachmentsContainerEl.empty();
+		for (let i = 0; i < this.pendingAttachments.length; i++) {
+			const att = this.pendingAttachments[i]!;
+			const sizeKb = (att.size / 1024).toFixed(1);
+			new Setting(this.pendingAttachmentsContainerEl)
+				.setName(`${att.filename} (${sizeKb} KB)`)
+				.addButton(btn => btn
+					.setButtonText('\u00d7')
+					.onClick(() => {
+						this.pendingAttachments.splice(i, 1);
+						this.renderPendingAttachments();
+						this.refreshFieldDropdown();
+					}));
+		}
+	}
+
+	private triggerAttachmentFileInput(): void {
+		this.attachmentInputCleanup?.();
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.addClass('vaultcrypt-hidden');
+		document.body.appendChild(input);
+
+		const cleanup = () => {
+			input.removeEventListener('change', onChange);
+			input.removeEventListener('cancel', onCancel);
+			input.remove();
+			if (this.attachmentInputCleanup === cleanup) {
+				this.attachmentInputCleanup = undefined;
+			}
+		};
+
+		const onCancel = () => cleanup();
+		const onChange = () => {
+			const file = input.files?.[0];
+			cleanup();
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = reader.result as ArrayBuffer;
+				const idx = this.pendingAttachments.findIndex(a => a.filename === file.name);
+				if (idx >= 0) {
+					this.pendingAttachments[idx] = {filename: file.name, data, size: file.size};
+				} else {
+					this.pendingAttachments.push({filename: file.name, data, size: file.size});
+				}
+				this.renderPendingAttachments();
+				this.refreshFieldDropdown();
+			};
+			reader.onerror = () => {
+				console.error('[VaultCrypt] InsertSecretModal attachment read failed', reader.error);
+				new Notice(`Failed to read file: ${file.name}`);
+			};
+			reader.readAsArrayBuffer(file);
+		};
+
+		this.attachmentInputCleanup = cleanup;
+		input.addEventListener('change', onChange);
+		input.addEventListener('cancel', onCancel);
+		input.click();
 	}
 
 	private buildFieldRefSection(container: HTMLElement) {
@@ -597,6 +673,13 @@ export class InsertSecretModal extends Modal {
 					if (val) options.push(name);
 				}
 			}
+			const attachmentNames = this.plugin.sessionService.getEntryAttachmentNames(profileId, this.selectedEntryPath);
+			if (attachmentNames) {
+				for (const name of attachmentNames) {
+					const fieldName = `${ATTACHMENT_PREFIX}${name}`;
+					if (!options.includes(fieldName)) options.push(fieldName);
+				}
+			}
 		} else if (this.newEntryGroupPath !== null) {
 			// Always offer Password for new entries even if blank
 			options.push('Password');
@@ -604,6 +687,10 @@ export class InsertSecretModal extends Modal {
 			if (this.fieldURL) options.push('URL');
 			for (const cf of this.customFields) {
 				if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+			}
+			for (const attachment of this.pendingAttachments) {
+				const fieldName = `${ATTACHMENT_PREFIX}${attachment.filename}`;
+				if (!options.includes(fieldName)) options.push(fieldName);
 			}
 		}
 
@@ -733,6 +820,25 @@ export class InsertSecretModal extends Modal {
 					fields,
 					config.path,
 				);
+
+				// Add any pending attachments to the newly created entry
+				const attachmentErrors: string[] = [];
+				for (const {filename, data} of this.pendingAttachments) {
+					try {
+						await this.plugin.sessionService.setAttachment(
+							peek(this.selectedProfileId$),
+							entryPath,
+							filename,
+							data,
+							config.path,
+						);
+					} catch (e) {
+						attachmentErrors.push(`"${filename}": ${e instanceof Error ? e.message : String(e)}`);
+					}
+				}
+				if (attachmentErrors.length > 0) {
+					new Notice(`Entry created but some attachments failed:\n${attachmentErrors.join('\n')}`, 8000);
+				}
 			}
 
 			this.editor?.replaceRange(token, this.editor.getCursor());
@@ -751,6 +857,7 @@ export class InsertSecretModal extends Modal {
 	onClose() {
 		this.isOpen = false;
 		this.inlineGroupCreatePath = null;
+		this.attachmentInputCleanup?.();
 		for (const stop of this.effects) stop();
 		this.stopLockEffect?.();
 		this.contentEl.empty();

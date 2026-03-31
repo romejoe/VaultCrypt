@@ -6,7 +6,7 @@ import {computed, effect, peek, signal, StopEffect} from '@maverick-js/signals';
 import {html, render} from 'lit-html';
 import {CHIP_DESTROY_EVENT} from './chip-component';
 
-const ATTACHMENT_PREFIX = 'attachment:';
+export const ATTACHMENT_PREFIX = 'attachment:';
 
 /** Sanitize a single path segment for safe use inside .vaultcrypt/attachments/. */
 function sanitizeVaultSegment(value: string): string {
