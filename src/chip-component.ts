@@ -5,8 +5,11 @@ import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {html, render, nothing} from 'lit-html';
 import {ref, createRef} from 'lit-html/directives/ref.js';
+import {buildAttachmentChipElement} from './attachment-chip';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
+
+const ATTACHMENT_PREFIX = 'attachment:';
 
 /** Editing sub-state: mode + in-progress value, or null when not editing. */
 interface EditState {
@@ -30,7 +33,17 @@ interface EditState {
  *                        ↓ on getFieldValue null
  *                       masked-error chip (verbose reason, retry button)
  */
+/**
+ * Dispatcher: routes to the attachment chip or the secret-value chip based on the token's field name.
+ */
 export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+	if (token.fieldName?.startsWith(ATTACHMENT_PREFIX)) {
+		return buildAttachmentChipElement(token, plugin);
+	}
+	return buildSecretChipElement(token, plugin);
+}
+
+function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
 	let effects: StopEffect[] = [];
 	const profileConfig = computed(() => {
