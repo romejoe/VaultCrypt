@@ -43,6 +43,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	root.title = `${profileId}/${token.entryPath}#${token.fieldName}`;
 
 	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
+	const missingReason = signal<string>(`Attachment not found: ${filename}`);
 
 	root.addEventListener(CHIP_DESTROY_EVENT, () => {
 		for (const stop of effects) stop?.();
@@ -66,8 +67,18 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	});
 
 	function resolveAttachmentState(): 'ready' | 'missing' {
+		// Distinguish entry-not-found from attachment-not-found for a clearer error message.
+		const entryFields = plugin.sessionService?.getEntryFields(profileId, token.entryPath);
+		if (entryFields === null || entryFields === undefined) {
+			missingReason.set(`Entry not found: ${token.entryPath}`);
+			return 'missing';
+		}
 		const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
-		return (data !== null && data !== undefined) ? 'ready' : 'missing';
+		if (data === null || data === undefined) {
+			missingReason.set(`Attachment not found: ${filename}`);
+			return 'missing';
+		}
+		return 'ready';
 	}
 
 	function renderUnknown() {
@@ -111,7 +122,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
 		render(html`
 			<span class="vaultcrypt-chip-icon">⚠</span>
-			<span>Attachment not found: ${filename}</span>
+			<span>${missingReason()}</span>
 		`, root);
 	}
 
@@ -147,7 +158,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			new Notice('Attachment does not appear to be valid UTF-8 text — use 💾 to save instead.');
 			return;
 		}
-		const secs = plugin.settings.security.clipboardClearSeconds;
+		const secs = plugin.settings$().security.clipboardClearSeconds;
 		navigator.clipboard.writeText(text).then(() => {
 			const msg = secs > 0 ? `Copied to clipboard (clears in ${secs}s)` : 'Copied to clipboard';
 			new Notice(msg, 3000);
