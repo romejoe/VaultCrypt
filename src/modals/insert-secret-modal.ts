@@ -608,6 +608,9 @@ export class InsertSecretModal extends Modal {
 				}
 				this.renderPendingAttachments();
 			};
+			reader.onerror = () => {
+				new Notice(`Failed to read file: ${file.name}`);
+			};
 			reader.readAsArrayBuffer(file);
 		});
 		input.click();
@@ -787,14 +790,22 @@ export class InsertSecretModal extends Modal {
 				);
 
 				// Add any pending attachments to the newly created entry
+				const attachmentErrors: string[] = [];
 				for (const {filename, data} of this.pendingAttachments) {
-					await this.plugin.sessionService.setAttachment(
-						peek(this.selectedProfileId$),
-						entryPath,
-						filename,
-						data,
-						config.path,
-					);
+					try {
+						await this.plugin.sessionService.setAttachment(
+							peek(this.selectedProfileId$),
+							entryPath,
+							filename,
+							data,
+							config.path,
+						);
+					} catch (e) {
+						attachmentErrors.push(`"${filename}": ${e instanceof Error ? e.message : String(e)}`);
+					}
+				}
+				if (attachmentErrors.length > 0) {
+					new Notice(`Entry created but some attachments failed:\n${attachmentErrors.join('\n')}`, 8000);
 				}
 			}
 

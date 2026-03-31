@@ -31,6 +31,15 @@ export interface DbTreeEntry {
  *
  * Note: kdbxweb's Argon2 implementation must be registered globally
  * (done in KdbxService constructor) before unlockProfile() is called.
+ *
+ * Error-handling strategy for mutations:
+ * - {@link setAttachment} and {@link setFieldValue} restore the in-memory
+ *   entry to its previous state on save failure, keeping the session usable.
+ * - {@link deleteAttachment} and {@link deleteEntry} cannot trivially roll
+ *   back, so they call {@link lockProfile} on save failure, forcing a clean
+ *   reload from disk on next unlock.
+ * Callers that mix both (e.g. the edit modal) should apply additions before
+ * deletions so that a failed add does not leave committed deletions behind.
  */
 export class UnlockSessionService {
 	private openDbs = new Map<string, kdbxweb.Kdbx>();

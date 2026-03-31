@@ -2,6 +2,7 @@ import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TFile, 
 import VaultCryptPlugin from '../main';
 import {GeneratePasswordModal} from './generate-password-modal';
 import type {ParsedVcToken} from '../inline-parser';
+import {ATTACHMENT_PREFIX} from '../attachment-chip';
 
 /** Characters allowed in a field name per inline-parser. */
 const VALID_FIELD_NAME = /^[a-zA-Z0-9_-]+$/;
@@ -325,6 +326,9 @@ export class EditSecretModal extends Modal {
 				if (replacingName) this.toRemove.delete(replacingName);
 				this.renderAttachments();
 			};
+			reader.onerror = () => {
+				new Notice(`Failed to read file: ${file.name}`);
+			};
 			reader.readAsArrayBuffer(file);
 		});
 		input.click();
@@ -424,23 +428,36 @@ export class EditSecretModal extends Modal {
 				config.path,
 			);
 
-			// Apply attachment removals then additions/replacements
-			for (const filename of this.toRemove) {
-				await this.plugin.sessionService.deleteAttachment(
-					this.profileId, this.entryPath, filename, config.path,
-				);
-			}
+			// Apply attachment additions/replacements first, then removals.
+			// Additions first so that a failure doesn't leave deletions already committed.
+			const attachmentErrors: string[] = [];
 			for (const {filename, data} of this.toAdd) {
-				await this.plugin.sessionService.setAttachment(
-					this.profileId, this.entryPath, filename, data, config.path,
-				);
+				try {
+					await this.plugin.sessionService.setAttachment(
+						this.profileId, this.entryPath, filename, data, config.path,
+					);
+				} catch (e) {
+					attachmentErrors.push(`add "${filename}": ${e instanceof Error ? e.message : String(e)}`);
+				}
+			}
+			for (const filename of this.toRemove) {
+				try {
+					await this.plugin.sessionService.deleteAttachment(
+						this.profileId, this.entryPath, filename, config.path,
+					);
+				} catch (e) {
+					attachmentErrors.push(`remove "${filename}": ${e instanceof Error ? e.message : String(e)}`);
+				}
+			}
+			if (attachmentErrors.length > 0) {
+				new Notice(`Some attachment changes failed:\n${attachmentErrors.join('\n')}`, 8000);
 			}
 
 			// If the reference field changed, update the token in the source file.
 			// Skip when the original token was an attachment reference — the dropdown
 			// cannot represent attachment names, so it always differs spuriously.
 			if (this.referenceField !== this.originalReferenceField
-				&& !this.originalReferenceField.startsWith('attachment:')) {
+				&& !this.originalReferenceField.startsWith(ATTACHMENT_PREFIX)) {
 				const newToken = this.buildTokenString();
 				await this.replaceTokenInSourceFile(this.token.raw, newToken);
 			}
