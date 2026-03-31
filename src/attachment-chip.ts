@@ -114,7 +114,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		render(html`
 			<span class="vaultcrypt-chip-icon">📎</span>
 			<span class="vaultcrypt-chip-value">${filename}</span>
-			<button type="button" class="vaultcrypt-chip-btn" title="Save to vault" aria-label="Save ${filename} to vault"
+			<button type="button" class="vaultcrypt-chip-btn" title="Save attachment" aria-label="Save attachment ${filename}"
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					void saveAttachment();
@@ -145,29 +145,37 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 
+		// Warn before saving large files.
+		if (data.byteLength > 5 * 1024 * 1024) {
+			const sizeMb = (data.byteLength / (1024 * 1024)).toFixed(1);
+			if (!window.confirm(`This attachment is ${sizeMb} MB. Save it anyway?`)) return;
+		}
+
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
+			// Scope the try/catch to Electron discovery only so that a failed write
+			// surfaces an explicit error rather than silently falling back to vault.
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
+			let dialog: {showSaveDialog(o: {defaultPath: string}): Promise<{canceled: boolean; filePath?: string}>} | undefined;
 			try {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
-				const remote = (window as any).require?.('@electron/remote');
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
-				const dialog = remote?.dialog;
-				if (dialog) {
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
-					const result = await dialog.showSaveDialog({defaultPath: filename});
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-					if (result.canceled) return;
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
-					const destPath: string = result.filePath;
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
+				dialog = (window as any).require?.('@electron/remote')?.dialog;
+			} catch {
+				dialog = undefined;
+			}
+			if (dialog) {
+				const result = await dialog.showSaveDialog({defaultPath: filename});
+				if (result.canceled || !result.filePath) return;
+				try {
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
 					const fs = (window as any).require?.('fs')?.promises;
 					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,no-undef
-					await fs.writeFile(destPath, Buffer.from(data));
-					new Notice(`Saved to ${destPath}`);
-					return;
+					await fs.writeFile(result.filePath, Buffer.from(data));
+					new Notice(`Saved to ${result.filePath}`);
+				} catch (err) {
+					new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
 				}
-			} catch {
-				// Fall through to vault save if Electron dialog is unavailable.
+				return;
 			}
 		}
 
