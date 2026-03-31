@@ -10,6 +10,7 @@ const ATTACHMENT_PREFIX = 'attachment:';
 
 /** Sanitize a single path segment for safe use inside .vaultcrypt/attachments/. */
 function sanitizeVaultSegment(value: string): string {
+	if (!value) return '_';
 	return value
 		// eslint-disable-next-line no-control-regex
 		.replace(/[\\/:*?"<>|\x00-\x1F]/g, '_')
@@ -150,7 +151,12 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			const dir = `${vcDir}/attachments/${safeProfileId}/${safeEntry}`;
 			const savePath = `${dir}/${safeFilename}`;
 			const adapter = plugin.app.vault.adapter;
-			try { await adapter.mkdir(dir); } catch { /* already exists */ }
+			try {
+				await adapter.mkdir(dir);
+			} catch (e) {
+				// Ignore "directory already exists"; propagate real errors (permissions, disk full, etc.)
+				if (!(e instanceof Error && e.message.includes('EEXIST'))) throw e;
+			}
 			await adapter.writeBinary(savePath, data);
 			new Notice(`Saved to vault: ${savePath}`);
 		} catch (err) {
