@@ -23,13 +23,18 @@ jobs:
                     npm install
                     npm run build
 
+            -   name: Package plugin
+                run: |
+                    tag="${GITHUB_REF#refs/tags/}"
+                    zip "vaultcrypt-${tag}.zip" main.js manifest.json styles.css
+
             -   name: Create release
                 env:
                     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                 run: |
                     tag="${GITHUB_REF#refs/tags/}"
-                    
+
                     gh release create "$tag" \
                       --title="$tag" \
                       --draft \
-                      main.js manifest.json styles.css
+                      main.js manifest.json styles.css "vaultcrypt-${tag}.zip"
