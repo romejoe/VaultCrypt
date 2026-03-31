@@ -48,6 +48,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
+	root.dataset.vcCopyText = token.raw;
 	root.title = `${profileId}/${token.entryPath}#${token.fieldName}`;
 
 	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
@@ -142,10 +143,11 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 		try {
+			const vcDir = plugin.settings$().general.vaultCryptDir;
 			const safeProfileId = sanitizeVaultSegment(profileId);
 			const safeEntry = token.entryPath.split('/').filter(Boolean).map(sanitizeVaultSegment).join('/');
 			const safeFilename = sanitizeVaultSegment(filename);
-			const dir = `.vaultcrypt/attachments/${safeProfileId}/${safeEntry}`;
+			const dir = `${vcDir}/attachments/${safeProfileId}/${safeEntry}`;
 			const savePath = `${dir}/${safeFilename}`;
 			const adapter = plugin.app.vault.adapter;
 			try { await adapter.mkdir(dir); } catch { /* already exists */ }

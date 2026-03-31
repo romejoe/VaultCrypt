@@ -284,6 +284,12 @@ export class UnlockSessionService {
 		if (!entry) return null;
 		const binary = entry.binaries.get(filename);
 		if (binary === undefined || binary === null) return null;
+		// Unwrap KdbxBinaryWithHash: { hash, value } wrapper kdbxweb uses after load
+		if (kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(binary)) {
+			const inner = binary.value;
+			if (inner instanceof kdbxweb.ProtectedValue) return inner.getBinary();
+			return inner as ArrayBuffer;
+		}
 		if (binary instanceof kdbxweb.ProtectedValue) return binary.getBinary();
 		return binary as ArrayBuffer;
 	}
