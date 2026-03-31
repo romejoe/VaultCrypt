@@ -145,6 +145,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 
+		// Warn before saving large files.
+		if (data.byteLength > 5 * 1024 * 1024) {
+			const sizeMb = (data.byteLength / (1024 * 1024)).toFixed(1);
+			// eslint-disable-next-line no-alert -- lightweight confirmation before large saves
+			if (!window.confirm(`This attachment is ${sizeMb} MB. Save it anyway?`)) return;
+		}
+
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
 			// Scope the try/catch to Electron discovery only so that a failed write
@@ -158,7 +165,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 				dialog = undefined;
 			}
 			if (dialog) {
-				const result = await dialog.showSaveDialog({defaultPath: filename});
+				let result: {canceled: boolean; filePath?: string};
+				try {
+					result = await dialog.showSaveDialog({defaultPath: filename});
+				} catch (err) {
+					new Notice(`Failed to open save dialog: ${err instanceof Error ? err.message : String(err)}`);
+					return;
+				}
 				if (result.canceled || !result.filePath) return;
 				try {
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
