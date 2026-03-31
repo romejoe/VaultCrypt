@@ -11,6 +11,7 @@ const ATTACHMENT_PREFIX = 'attachment:';
 /** Sanitize a single path segment for safe use inside .vaultcrypt/attachments/. */
 function sanitizeVaultSegment(value: string): string {
 	return value
+		// eslint-disable-next-line no-control-regex
 		.replace(/[\\/:*?"<>|\x00-\x1F]/g, '_')
 		.replace(/^\.+$/, '_');
 }
