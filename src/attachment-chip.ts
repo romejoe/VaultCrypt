@@ -145,12 +145,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 
-		// Warn before saving large files.
-		if (data.byteLength > 5 * 1024 * 1024) {
-			const sizeMb = (data.byteLength / (1024 * 1024)).toFixed(1);
-			// eslint-disable-next-line no-alert -- lightweight confirmation before large saves
-			if (!window.confirm(`This attachment is ${sizeMb} MB. Save it anyway?`)) return;
-		}
 
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
