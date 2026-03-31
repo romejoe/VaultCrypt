@@ -7,6 +7,7 @@ import {GeneratePasswordModal} from './generate-password-modal';
 import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
+import {ATTACHMENT_PREFIX} from '../attachment-chip';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ export class InsertSecretModal extends Modal {
 	private urlTextComponent?: TextComponent;
 	private pendingAttachments: { filename: string; data: ArrayBuffer; size: number }[] = [];
 	private pendingAttachmentsContainerEl!: HTMLElement;
+	private attachmentInputCleanup?: () => void;
 	private isSubmitting = false;
 	private isOpen = false;
 	private stopLockEffect?: StopEffect;
@@ -584,18 +586,31 @@ export class InsertSecretModal extends Modal {
 					.onClick(() => {
 						this.pendingAttachments.splice(i, 1);
 						this.renderPendingAttachments();
+						this.refreshFieldDropdown();
 					}));
 		}
 	}
 
 	private triggerAttachmentFileInput(): void {
+		this.attachmentInputCleanup?.();
 		const input = document.createElement('input');
 		input.type = 'file';
 		input.addClass('vaultcrypt-hidden');
 		document.body.appendChild(input);
-		input.addEventListener('change', () => {
+
+		const cleanup = () => {
+			input.removeEventListener('change', onChange);
+			input.removeEventListener('cancel', onCancel);
+			input.remove();
+			if (this.attachmentInputCleanup === cleanup) {
+				this.attachmentInputCleanup = undefined;
+			}
+		};
+
+		const onCancel = () => cleanup();
+		const onChange = () => {
 			const file = input.files?.[0];
-			document.body.removeChild(input);
+			cleanup();
 			if (!file) return;
 			const reader = new FileReader();
 			reader.onload = () => {
@@ -607,12 +622,18 @@ export class InsertSecretModal extends Modal {
 					this.pendingAttachments.push({filename: file.name, data, size: file.size});
 				}
 				this.renderPendingAttachments();
+				this.refreshFieldDropdown();
 			};
 			reader.onerror = () => {
+				console.error('[VaultCrypt] InsertSecretModal attachment read failed', reader.error);
 				new Notice(`Failed to read file: ${file.name}`);
 			};
 			reader.readAsArrayBuffer(file);
-		});
+		};
+
+		this.attachmentInputCleanup = cleanup;
+		input.addEventListener('change', onChange);
+		input.addEventListener('cancel', onCancel);
 		input.click();
 	}
 
@@ -652,6 +673,13 @@ export class InsertSecretModal extends Modal {
 					if (val) options.push(name);
 				}
 			}
+			const attachmentNames = this.plugin.sessionService.getEntryAttachmentNames(profileId, this.selectedEntryPath);
+			if (attachmentNames) {
+				for (const name of attachmentNames) {
+					const fieldName = `${ATTACHMENT_PREFIX}${name}`;
+					if (!options.includes(fieldName)) options.push(fieldName);
+				}
+			}
 		} else if (this.newEntryGroupPath !== null) {
 			// Always offer Password for new entries even if blank
 			options.push('Password');
@@ -659,6 +687,10 @@ export class InsertSecretModal extends Modal {
 			if (this.fieldURL) options.push('URL');
 			for (const cf of this.customFields) {
 				if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+			}
+			for (const attachment of this.pendingAttachments) {
+				const fieldName = `${ATTACHMENT_PREFIX}${attachment.filename}`;
+				if (!options.includes(fieldName)) options.push(fieldName);
 			}
 		}
 
@@ -825,6 +857,7 @@ export class InsertSecretModal extends Modal {
 	onClose() {
 		this.isOpen = false;
 		this.inlineGroupCreatePath = null;
+		this.attachmentInputCleanup?.();
 		for (const stop of this.effects) stop();
 		this.stopLockEffect?.();
 		this.contentEl.empty();

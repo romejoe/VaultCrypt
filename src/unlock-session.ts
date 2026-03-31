@@ -316,6 +316,31 @@ export class UnlockSessionService {
 	}
 
 	/**
+	 * Returns attachment names with their byte sizes, or null if the profile is
+	 * locked or the entry cannot be found.
+	 */
+	getEntryAttachmentMeta(profileId: string, entryPath: string): { name: string; size: number }[] | null {
+		const db = this.getDatabase(profileId);
+		if (!db) return null;
+		const entry = this.resolveEntry(db, entryPath);
+		if (!entry) return null;
+		const result: { name: string; size: number }[] = [];
+		for (const [name, binary] of entry.binaries) {
+			let buf: ArrayBuffer | null = null;
+			if (kdbxweb.KdbxBinaries.isKdbxBinaryWithHash(binary)) {
+				const inner = binary.value;
+				buf = inner instanceof kdbxweb.ProtectedValue ? inner.getBinary() : inner;
+			} else if (binary instanceof kdbxweb.ProtectedValue) {
+				buf = binary.getBinary();
+			} else {
+				buf = binary;
+			}
+			result.push({ name, size: buf?.byteLength ?? 0 });
+		}
+		return result;
+	}
+
+	/**
 	 * Adds or replaces a named binary attachment on an entry and saves the database.
 	 * Throws if the profile is locked or the entry does not exist.
 	 */
