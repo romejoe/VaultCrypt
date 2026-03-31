@@ -49,6 +49,8 @@ export class InsertSecretModal extends Modal {
 	private userNameTextComponent?: TextComponent;
 	private passwordTextComponent?: TextComponent;
 	private urlTextComponent?: TextComponent;
+	private pendingAttachments: { filename: string; data: ArrayBuffer; size: number }[] = [];
+	private pendingAttachmentsContainerEl!: HTMLElement;
 	private isSubmitting = false;
 	private isOpen = false;
 	private stopLockEffect?: StopEffect;
@@ -529,6 +531,13 @@ export class InsertSecretModal extends Modal {
 					this.renderCustomFields();
 					this.refreshFieldDropdown();
 				}));
+
+		this.pendingAttachmentsContainerEl = container.createDiv();
+
+		new Setting(container)
+			.addButton(btn => btn
+				.setButtonText('Add attachment')
+				.onClick(() => this.triggerAttachmentFileInput()));
 	}
 
 	private renderCustomFields() {
@@ -559,6 +568,47 @@ export class InsertSecretModal extends Modal {
 						this.refreshFieldDropdown();
 					}));
 		}
+	}
+
+	private renderPendingAttachments() {
+		this.pendingAttachmentsContainerEl.empty();
+		for (let i = 0; i < this.pendingAttachments.length; i++) {
+			const att = this.pendingAttachments[i]!;
+			const sizeKb = (att.size / 1024).toFixed(1);
+			new Setting(this.pendingAttachmentsContainerEl)
+				.setName(`${att.filename} (${sizeKb} KB)`)
+				.addButton(btn => btn
+					.setButtonText('\u00d7')
+					.onClick(() => {
+						this.pendingAttachments.splice(i, 1);
+						this.renderPendingAttachments();
+					}));
+		}
+	}
+
+	private triggerAttachmentFileInput(): void {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.style.display = 'none';
+		document.body.appendChild(input);
+		input.addEventListener('change', () => {
+			const file = input.files?.[0];
+			document.body.removeChild(input);
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = reader.result as ArrayBuffer;
+				const idx = this.pendingAttachments.findIndex(a => a.filename === file.name);
+				if (idx >= 0) {
+					this.pendingAttachments[idx] = {filename: file.name, data, size: file.size};
+				} else {
+					this.pendingAttachments.push({filename: file.name, data, size: file.size});
+				}
+				this.renderPendingAttachments();
+			};
+			reader.readAsArrayBuffer(file);
+		});
+		input.click();
 	}
 
 	private buildFieldRefSection(container: HTMLElement) {
@@ -733,6 +783,17 @@ export class InsertSecretModal extends Modal {
 					fields,
 					config.path,
 				);
+
+				// Add any pending attachments to the newly created entry
+				for (const {filename, data} of this.pendingAttachments) {
+					await this.plugin.sessionService.setAttachment(
+						peek(this.selectedProfileId$),
+						entryPath,
+						filename,
+						data,
+						config.path,
+					);
+				}
 			}
 
 			this.editor?.replaceRange(token, this.editor.getCursor());

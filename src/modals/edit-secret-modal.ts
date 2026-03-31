@@ -31,6 +31,12 @@ export class EditSecretModal extends Modal {
 	// The file that was active when the modal opened — used for token replacement
 	private sourceFile: TFile | null = null;
 
+	// Attachment state
+	private existingAttachmentNames: string[] = [];
+	private toAdd: { filename: string; data: ArrayBuffer; size: number }[] = [];
+	private toRemove = new Set<string>();
+	private attachmentsSectionEl!: HTMLElement;
+
 	// DOM refs
 	private customFieldsContainerEl!: HTMLElement;
 	private errorEl!: HTMLParagraphElement;
@@ -76,6 +82,10 @@ export class EditSecretModal extends Modal {
 				this.customFields.push({key, value});
 			}
 		}
+
+		// Load current attachment names
+		this.existingAttachmentNames =
+			this.plugin.sessionService.getEntryAttachmentNames(this.profileId, this.entryPath) ?? [];
 
 		// Entry name (read-only)
 		new Setting(contentEl)
@@ -170,6 +180,17 @@ export class EditSecretModal extends Modal {
 					this.refreshFieldDropdown();
 				}));
 
+		// Attachments section
+		contentEl.createEl('hr');
+		contentEl.createEl('p', {cls: 'setting-item-name', text: 'Attachments'});
+		this.attachmentsSectionEl = contentEl.createDiv();
+		this.renderAttachments();
+
+		new Setting(contentEl)
+			.addButton(btn => btn
+				.setButtonText('Add attachment')
+				.onClick(() => this.triggerFileInput()));
+
 		// Reference field dropdown
 		contentEl.createEl('hr');
 
@@ -234,6 +255,79 @@ export class EditSecretModal extends Modal {
 						this.refreshFieldDropdown();
 					}));
 		}
+	}
+
+	private renderAttachments() {
+		this.attachmentsSectionEl.empty();
+
+		// Existing attachments not queued for removal
+		for (const name of this.existingAttachmentNames) {
+			if (this.toRemove.has(name)) continue;
+			const replacement = this.toAdd.find(a => a.filename === name);
+			const displayName = replacement ? `${name} (replaced)` : name;
+			new Setting(this.attachmentsSectionEl)
+				.setName(displayName)
+				.addButton(btn => btn
+					.setButtonText('Replace')
+					.onClick(() => this.triggerFileInput(name)))
+				.addButton(btn => btn
+					.setButtonText('Remove')
+					.setWarning()
+					.onClick(() => {
+						this.toRemove.add(name);
+						this.toAdd = this.toAdd.filter(a => a.filename !== name);
+						this.renderAttachments();
+					}));
+		}
+
+		// Pending new additions (filenames not in existingAttachmentNames)
+		for (const pending of this.toAdd) {
+			if (this.existingAttachmentNames.includes(pending.filename)) continue;
+			const sizeKb = (pending.size / 1024).toFixed(1);
+			new Setting(this.attachmentsSectionEl)
+				.setName(`${pending.filename} (${sizeKb} KB) — pending`)
+				.addButton(btn => btn
+					.setButtonText('\u00d7')
+					.onClick(() => {
+						this.toAdd = this.toAdd.filter(a => a.filename !== pending.filename);
+						this.renderAttachments();
+					}));
+		}
+
+		// Items queued for removal (with undo)
+		for (const name of this.toRemove) {
+			new Setting(this.attachmentsSectionEl)
+				.setName(`${name} — will be removed`)
+				.addButton(btn => btn
+					.setButtonText('Undo')
+					.onClick(() => {
+						this.toRemove.delete(name);
+						this.renderAttachments();
+					}));
+		}
+	}
+
+	private triggerFileInput(replacingName?: string): void {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.style.display = 'none';
+		document.body.appendChild(input);
+		input.addEventListener('change', () => {
+			const file = input.files?.[0];
+			document.body.removeChild(input);
+			if (!file) return;
+			const reader = new FileReader();
+			reader.onload = () => {
+				const data = reader.result as ArrayBuffer;
+				const filename = replacingName ?? file.name;
+				this.toAdd = this.toAdd.filter(a => a.filename !== filename);
+				this.toAdd.push({filename, data, size: file.size});
+				if (replacingName) this.toRemove.delete(replacingName);
+				this.renderAttachments();
+			};
+			reader.readAsArrayBuffer(file);
+		});
+		input.click();
 	}
 
 	private refreshFieldDropdown() {
@@ -329,6 +423,18 @@ export class EditSecretModal extends Modal {
 				fields,
 				config.path,
 			);
+
+			// Apply attachment removals then additions/replacements
+			for (const filename of this.toRemove) {
+				await this.plugin.sessionService.deleteAttachment(
+					this.profileId, this.entryPath, filename, config.path,
+				);
+			}
+			for (const {filename, data} of this.toAdd) {
+				await this.plugin.sessionService.setAttachment(
+					this.profileId, this.entryPath, filename, data, config.path,
+				);
+			}
 
 			// If the reference field changed, update the token in the source file
 			if (this.referenceField !== this.originalReferenceField) {
