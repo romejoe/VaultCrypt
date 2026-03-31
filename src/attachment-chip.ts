@@ -145,12 +145,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 
-		// Warn before saving large files.
-		if (data.byteLength > 5 * 1024 * 1024) {
-			const sizeMb = (data.byteLength / (1024 * 1024)).toFixed(1);
-			if (!window.confirm(`This attachment is ${sizeMb} MB. Save it anyway?`)) return;
-		}
-
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
 			// Scope the try/catch to Electron discovery only so that a failed write
