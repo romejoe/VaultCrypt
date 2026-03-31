@@ -8,6 +8,13 @@ import {CHIP_DESTROY_EVENT} from './chip-component';
 
 const ATTACHMENT_PREFIX = 'attachment:';
 
+/** Sanitize a single path segment for safe use inside .vaultcrypt/attachments/. */
+function sanitizeVaultSegment(value: string): string {
+	return value
+		.replace(/[\\/:*?"<>|\x00-\x1F]/g, '_')
+		.replace(/^\.+$/, '_');
+}
+
 /** Extensions considered safe to decode as UTF-8 and copy to clipboard. */
 const TEXT_EXTENSIONS = new Set([
 	'.txt', '.md', '.pem', '.crt', '.cer', '.key', '.pub', '.csr',
@@ -89,12 +96,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	function renderLocked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
 		render(html`
-			<span @click=${(evt: MouseEvent) => {
-				evt.stopPropagation();
-				new UnlockModal(plugin.app, plugin, profileId, () => {
-					chipState.set(resolveAttachmentState());
-				}).open();
-			}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</span>
+			<button type="button" class="vaultcrypt-chip-btn" aria-label="Unlock ${profileId}"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					new UnlockModal(plugin.app, plugin, profileId, () => {
+						chipState.set(resolveAttachmentState());
+					}).open();
+				}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</button>
 		`, root);
 	}
 
@@ -103,13 +111,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		render(html`
 			<span class="vaultcrypt-chip-icon">📎</span>
 			<span class="vaultcrypt-chip-value">${filename}</span>
-			<button class="vaultcrypt-chip-btn" title="Save to vault"
+			<button type="button" class="vaultcrypt-chip-btn" title="Save to vault" aria-label="Save ${filename} to vault"
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					void saveAttachment();
 				}}>💾</button>
 			${isText ? html`
-				<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard" aria-label="Copy ${filename} to clipboard"
 					@click=${(evt: MouseEvent) => {
 						evt.stopPropagation();
 						copyAttachment();
@@ -133,9 +141,11 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 		try {
-			const sanitizedEntry = token.entryPath.replace(/[<>:"|?*]/g, '_');
-			const dir = `.vaultcrypt/attachments/${profileId}/${sanitizedEntry}`;
-			const savePath = `${dir}/${filename}`;
+			const safeProfileId = sanitizeVaultSegment(profileId);
+			const safeEntry = token.entryPath.split('/').filter(Boolean).map(sanitizeVaultSegment).join('/');
+			const safeFilename = sanitizeVaultSegment(filename);
+			const dir = `.vaultcrypt/attachments/${safeProfileId}/${safeEntry}`;
+			const savePath = `${dir}/${safeFilename}`;
 			const adapter = plugin.app.vault.adapter;
 			try { await adapter.mkdir(dir); } catch { /* already exists */ }
 			await adapter.writeBinary(savePath, data);
