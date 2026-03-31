@@ -1,4 +1,4 @@
-import {Menu, Notice} from 'obsidian';
+import {Menu, Notice, Platform} from 'obsidian';
 import {UnlockModal} from './modals';
 import {ParsedVcToken} from './inline-parser';
 import type VaultCryptPlugin from './main';
@@ -100,12 +100,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
 		render(html`
 			<button type="button" class="vaultcrypt-chip-btn" aria-label="Unlock ${profileId}"
-				@click=${(evt: MouseEvent) => {
-					evt.stopPropagation();
-					new UnlockModal(plugin.app, plugin, profileId, () => {
-						chipState.set(resolveAttachmentState());
-					}).open();
-				}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</button>
+			        @click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						new UnlockModal(plugin.app, plugin, profileId, () => {
+							chipState.set(resolveAttachmentState());
+						}).open();
+					}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}
+			</button>
 		`, root);
 	}
 
@@ -114,18 +115,26 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		render(html`
 			<span class="vaultcrypt-chip-icon">📎</span>
 			<span class="vaultcrypt-chip-value">${filename}</span>
-			<button type="button" class="vaultcrypt-chip-btn" title="Save to vault" aria-label="Save ${filename} to vault"
-				@click=${(evt: MouseEvent) => {
-					evt.stopPropagation();
-					void saveAttachment();
-				}}>💾</button>
-			${isText ? html`
-				<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard" aria-label="Copy ${filename} to clipboard"
-					@click=${(evt: MouseEvent) => {
+			<button type="button" class="vaultcrypt-chip-btn" title="Save attachment"
+			        aria-label="Save attachment ${filename}"
+			        @click=${(evt: MouseEvent) => {
 						evt.stopPropagation();
-						copyAttachment();
-					}}>📋</button>
-			` : null}
+						void saveAttachment();
+					}}>💾
+			</button>
+			${isText
+				? html`
+					<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard"
+					        aria-label="Copy ${filename} to clipboard"
+					        @click=${(evt: MouseEvent) => {
+								evt.stopPropagation();
+								copyAttachment();
+							}}>📋
+					</button>`
+				: html`
+					<button type="button" class="vaultcrypt-chip-btn" title="Binary file — use Save instead"
+					        aria-label="Binary file — use Save instead" disabled>📋
+					</button>`}
 		`, root);
 	}
 
@@ -143,6 +152,60 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			new Notice('Could not read attachment — is the profile still unlocked?');
 			return;
 		}
+
+
+		// Desktop: try Electron save dialog.
+		if (Platform.isDesktop) {
+			// Scope the try/catch to Electron discovery only so that a failed write
+			// surfaces an explicit error rather than silently falling back to vault.
+			
+			let dialog: {
+				showSaveDialog(o: { defaultPath: string }): Promise<{ canceled: boolean; filePath?: string }>
+			} | undefined;
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
+				dialog = (window as any).require?.('@electron/remote')?.dialog;
+			} catch {
+				dialog = undefined;
+			}
+			if (dialog) {
+				let result: { canceled: boolean; filePath?: string };
+				try {
+					result = await dialog.showSaveDialog({defaultPath: filename});
+				} catch (err) {
+					new Notice(`Failed to open save dialog: ${err instanceof Error ? err.message : String(err)}`);
+					return;
+				}
+				if (result.canceled || !result.filePath) return;
+				try {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
+					const fs = (window as any).require?.('fs')?.promises;
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,no-undef
+					await fs.writeFile(result.filePath, Buffer.from(data));
+					new Notice(`Saved to ${result.filePath}`);
+				} catch (err) {
+					new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				return;
+			}
+		}
+
+		// Mobile: try Web Share API.
+		if (Platform.isMobile) {
+			try {
+				const file = new File([data], filename, {type: 'application/octet-stream'});
+				if (navigator.canShare?.({files: [file]})) {
+					const file = new File([data], filename, {type: 'application/octet-stream'});
+					await navigator.share({files: [file]});
+					return;
+				}
+			} catch (err) {
+				// User cancelled share or share failed; fall through to vault save.
+				if (err instanceof Error && err.name === 'AbortError') return;
+			}
+		}
+
+		// Fallback: save into the vault's .vaultcrypt/attachments/ directory.
 		try {
 			const vcDir = plugin.settings$().general.vaultCryptDir;
 			const safeProfileId = sanitizeVaultSegment(profileId);
