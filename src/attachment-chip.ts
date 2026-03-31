@@ -1,4 +1,4 @@
-import {Menu, Notice} from 'obsidian';
+import {Menu, Notice, Platform} from 'obsidian';
 import {UnlockModal} from './modals';
 import {ParsedVcToken} from './inline-parser';
 import type VaultCryptPlugin from './main';
@@ -119,13 +119,14 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 					evt.stopPropagation();
 					void saveAttachment();
 				}}>💾</button>
-			${isText ? html`
-				<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard" aria-label="Copy ${filename} to clipboard"
+			${isText
+				? html`<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard" aria-label="Copy ${filename} to clipboard"
 					@click=${(evt: MouseEvent) => {
 						evt.stopPropagation();
 						copyAttachment();
-					}}>📋</button>
-			` : null}
+					}}>📋</button>`
+				: html`<button type="button" class="vaultcrypt-chip-btn" title="Binary file — use Save instead"
+					aria-label="Binary file — use Save instead" disabled>📋</button>`}
 		`, root);
 	}
 
@@ -143,6 +144,48 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			new Notice('Could not read attachment — is the profile still unlocked?');
 			return;
 		}
+
+		// Desktop: try Electron save dialog.
+		if (Platform.isDesktop) {
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
+				const remote = (window as any).require?.('@electron/remote');
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
+				const dialog = remote?.dialog;
+				if (dialog) {
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
+					const result = await dialog.showSaveDialog({defaultPath: filename});
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+					if (result.canceled) return;
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
+					const destPath: string = result.filePath;
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
+					const fs = (window as any).require?.('fs')?.promises;
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,no-undef
+					await fs.writeFile(destPath, Buffer.from(data));
+					new Notice(`Saved to ${destPath}`);
+					return;
+				}
+			} catch {
+				// Fall through to vault save if Electron dialog is unavailable.
+			}
+		}
+
+		// Mobile: try Web Share API.
+		if (Platform.isMobile) {
+			try {
+				if (navigator.share) {
+					const file = new File([data], filename, {type: 'application/octet-stream'});
+					await navigator.share({files: [file]});
+					return;
+				}
+			} catch (err) {
+				// User cancelled share or share failed; fall through to vault save.
+				if (err instanceof Error && err.name === 'AbortError') return;
+			}
+		}
+
+		// Fallback: save into the vault's .vaultcrypt/attachments/ directory.
 		try {
 			const vcDir = plugin.settings$().general.vaultCryptDir;
 			const safeProfileId = sanitizeVaultSegment(profileId);
