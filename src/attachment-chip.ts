@@ -46,6 +46,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 	root.addEventListener(CHIP_DESTROY_EVENT, () => {
 		for (const stop of effects) stop?.();
+		effects = [];
 	});
 
 	root.addEventListener('contextmenu', (evt) => {
