@@ -436,8 +436,11 @@ export class EditSecretModal extends Modal {
 				);
 			}
 
-			// If the reference field changed, update the token in the source file
-			if (this.referenceField !== this.originalReferenceField) {
+			// If the reference field changed, update the token in the source file.
+			// Skip when the original token was an attachment reference — the dropdown
+			// cannot represent attachment names, so it always differs spuriously.
+			if (this.referenceField !== this.originalReferenceField
+				&& !this.originalReferenceField.startsWith('attachment:')) {
 				const newToken = this.buildTokenString();
 				await this.replaceTokenInSourceFile(this.token.raw, newToken);
 			}

@@ -191,6 +191,8 @@ export class InsertSecretModal extends Modal {
 		this.passwordTextComponent?.setValue('');
 		this.urlTextComponent?.setValue('');
 		this.customFieldsContainerEl?.empty();
+		this.pendingAttachments = [];
+		this.pendingAttachmentsContainerEl?.empty();
 		this.entryNameErrorEl?.addClass('vaultcrypt-hidden');
 
 		this.entryFieldsSectionEl.addClass('vaultcrypt-hidden');
