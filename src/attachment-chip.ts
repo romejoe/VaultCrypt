@@ -467,7 +467,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			try {
 				const file = new File([data], filename, {type: 'application/octet-stream'});
 				if (navigator.canShare?.({files: [file]})) {
-					const file = new File([data], filename, {type: 'application/octet-stream'});
 					await navigator.share({files: [file]});
 					return;
 				}
@@ -539,10 +538,11 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			if (peek(chipState) === 'locked' || peek(chipState) === 'unknown') {
 				const newState = resolveAttachmentState();
 				if (newState === 'ready') {
-					if (canPreview && plugin.settings.general.autoPreviewAttachments) {
+					const generalSettings = plugin.settings$().general;
+					if (canPreview && generalSettings.autoPreviewAttachments) {
 						attachmentRevealed.set(true);
 						previewOpen.set(true);
-					} else if (plugin.settings.general.autoUnmask) {
+					} else if (generalSettings.autoUnmask) {
 						attachmentRevealed.set(true);
 					}
 				}
