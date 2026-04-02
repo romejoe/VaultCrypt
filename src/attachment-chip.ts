@@ -3,10 +3,13 @@ import {UnlockModal} from './modals';
 import {ParsedVcToken} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from '@maverick-js/signals';
-import {html, render} from 'lit-html';
+import {html, render, nothing} from 'lit-html';
+import {unsafeHTML} from 'lit-html/directives/unsafe-html.js';
 import {CHIP_DESTROY_EVENT} from './chip-component';
 
 export const ATTACHMENT_PREFIX = 'attachment:';
+
+const MAX_PREVIEW_BYTES = 10 * 1024; // 10 KB
 
 /** Sanitize a single path segment for safe use inside .vaultcrypt/attachments/. */
 function sanitizeVaultSegment(value: string): string {
@@ -24,10 +27,57 @@ const TEXT_EXTENSIONS = new Set([
 	'.log', '.sh', '.env', '.p7b', '.p7c',
 ]);
 
-function isTextAttachment(name: string): boolean {
+const IMAGE_MIME_TYPES: Record<string, string> = {
+	'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+	'.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
+	'.svg': 'image/svg+xml',
+};
+
+const VIDEO_MIME_TYPES: Record<string, string> = {
+	'.mp4': 'video/mp4', '.webm': 'video/webm',
+	'.ogg': 'video/ogg', '.mov': 'video/quicktime',
+};
+
+/**
+ * File extension → Prism language token.
+ * Subset that is reliably bundled with Obsidian's Prism instance.
+ */
+const PRISM_LANG_MAP: Record<string, string> = {
+	'.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
+	'.xml': 'xml', '.sh': 'bash', '.md': 'markdown',
+	'.html': 'html', '.css': 'css',
+	'.toml': 'toml', '.ini': 'ini', '.conf': 'ini',
+};
+
+/** Duck-typed access to Obsidian's bundled Prism instance. */
+type PrismLike = {
+	highlight(text: string, grammar: object, lang: string): string;
+	languages: Record<string, object | undefined>;
+};
+
+function getExt(name: string): string {
 	const dot = name.lastIndexOf('.');
-	if (dot === -1) return false;
-	return TEXT_EXTENSIONS.has(name.slice(dot).toLowerCase());
+	return dot === -1 ? '' : name.slice(dot).toLowerCase();
+}
+
+function isTextAttachment(name: string): boolean {
+	return TEXT_EXTENSIONS.has(getExt(name));
+}
+
+function isImageAttachment(name: string): boolean {
+	return getExt(name) in IMAGE_MIME_TYPES;
+}
+
+function isVideoAttachment(name: string): boolean {
+	return getExt(name) in VIDEO_MIME_TYPES;
+}
+
+function prismLang(name: string): string | null {
+	return PRISM_LANG_MAP[getExt(name)] ?? null;
+}
+
+function getGlobalPrism(): PrismLike | undefined {
+	return (window as unknown as { Prism?: PrismLike }).Prism;
 }
 
 /**
@@ -36,28 +86,42 @@ function isTextAttachment(name: string): boolean {
  * State machine:
  *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
- *   profile unlocked →  ready chip (📎 filename [💾] [📋 text only]) or missing chip (⚠ not found)
+ *   profile unlocked →  ready chip (📎 filename [💾] [📋 text only] [▶ previewable]) or missing chip (⚠ not found)
  */
 export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
 	const filename = token.fieldName!.slice(ATTACHMENT_PREFIX.length);
 	const isText = isTextAttachment(filename);
+	const isImage = isImageAttachment(filename);
+	const isVideo = isVideoAttachment(filename);
+	const canPreview = isText || isImage || isVideo;
+
 	let effects: StopEffect[] = [];
+	let previewObjectUrl: string | null = null;
 
 	const profileConfig = computed(() => plugin.settings$().profiles[profileId]);
 	const compact = computed(() => plugin.settings$().general.compactChips);
+
+	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
+	const missingReason = signal<string>(`Attachment not found: ${filename}`);
+	const previewOpen = signal(false);
 
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
 	root.dataset.vcCopyText = token.raw;
 	root.title = `${profileId}/${token.entryPath}#${token.fieldName}`;
 
-	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
-	const missingReason = signal<string>(`Attachment not found: ${filename}`);
+	function revokePreviewUrl() {
+		if (previewObjectUrl) {
+			URL.revokeObjectURL(previewObjectUrl);
+			previewObjectUrl = null;
+		}
+	}
 
 	root.addEventListener(CHIP_DESTROY_EVENT, () => {
 		for (const stop of effects) stop?.();
 		effects = [];
+		revokePreviewUrl();
 	});
 
 	root.addEventListener('contextmenu', (evt) => {
@@ -91,6 +155,62 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		return 'ready';
 	}
 
+	function togglePreview() {
+		if (peek(previewOpen)) {
+			revokePreviewUrl();
+			previewOpen.set(false);
+		} else {
+			previewOpen.set(true);
+		}
+	}
+
+	function buildTextPreview() {
+		const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
+		if (!data) {
+			return html`<div class="vaultcrypt-preview-error">Attachment not available.</div>`;
+		}
+		const isLarge = data.byteLength > MAX_PREVIEW_BYTES;
+		const slice = isLarge ? data.slice(0, MAX_PREVIEW_BYTES) : data;
+		let text: string;
+		try {
+			text = new TextDecoder('utf-8', {fatal: true}).decode(slice);
+		} catch {
+			return html`<div class="vaultcrypt-preview-error">Cannot display: not valid UTF-8.</div>`;
+		}
+		const lang = prismLang(filename);
+		const prism = getGlobalPrism();
+		const grammar = lang ? prism?.languages[lang] : undefined;
+		return html`
+			<div class="vaultcrypt-attachment-preview">
+				<pre class="vaultcrypt-preview-code"><code class=${lang ? `language-${lang}` : nothing}>${
+					grammar && prism && lang
+						? unsafeHTML(prism.highlight(text, grammar, lang))
+						: text
+				}</code></pre>
+				${isLarge
+					? html`<p class="vaultcrypt-preview-truncated">… (truncated — ${Math.round(data.byteLength / 1024)} KB total)</p>`
+					: nothing}
+			</div>
+		`;
+	}
+
+	function buildMediaPreview(type: 'image' | 'video') {
+		const data = plugin.sessionService?.getAttachment(profileId, token.entryPath, filename);
+		if (!data) {
+			return html`<div class="vaultcrypt-preview-error">Attachment not available.</div>`;
+		}
+		const ext = getExt(filename);
+		const mime = type === 'image'
+			? (IMAGE_MIME_TYPES[ext] ?? 'image/png')
+			: (VIDEO_MIME_TYPES[ext] ?? 'video/mp4');
+		if (!previewObjectUrl) {
+			previewObjectUrl = URL.createObjectURL(new Blob([data], {type: mime}));
+		}
+		return type === 'image'
+			? html`<div class="vaultcrypt-attachment-preview"><img src="${previewObjectUrl}" alt="${filename}" class="vaultcrypt-preview-image"></div>`
+			: html`<div class="vaultcrypt-attachment-preview"><video src="${previewObjectUrl}" controls class="vaultcrypt-preview-video"></video></div>`;
+	}
+
 	function renderUnknown() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-error';
 		render(html`⚠ unknown profile: ${token.profileId}`, root);
@@ -111,30 +231,51 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	}
 
 	function renderReady() {
-		root.className = 'vaultcrypt-chip vaultcrypt-chip-file';
+		const isOpen = previewOpen();
+		root.className = `vaultcrypt-chip vaultcrypt-chip-file${isOpen ? ' vaultcrypt-chip-expanded' : ''}`;
 		render(html`
-			<span class="vaultcrypt-chip-icon">📎</span>
-			<span class="vaultcrypt-chip-value">${filename}</span>
-			<button type="button" class="vaultcrypt-chip-btn" title="Save attachment"
-			        aria-label="Save attachment ${filename}"
-			        @click=${(evt: MouseEvent) => {
-						evt.stopPropagation();
-						void saveAttachment();
-					}}>💾
-			</button>
-			${isText
-				? html`
-					<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard"
-					        aria-label="Copy ${filename} to clipboard"
-					        @click=${(evt: MouseEvent) => {
-								evt.stopPropagation();
-								copyAttachment();
-							}}>📋
-					</button>`
-				: html`
-					<button type="button" class="vaultcrypt-chip-btn" title="Binary file — use Save instead"
-					        aria-label="Binary file — use Save instead" disabled>📋
-					</button>`}
+			<span class="vaultcrypt-chip-file-row">
+				<span class="vaultcrypt-chip-icon">📎</span>
+				<span class="vaultcrypt-chip-value">${filename}</span>
+				<button type="button" class="vaultcrypt-chip-btn" title="Save attachment"
+				        aria-label="Save attachment ${filename}"
+				        @click=${(evt: MouseEvent) => {
+							evt.stopPropagation();
+							void saveAttachment();
+						}}>💾
+				</button>
+				${isText
+					? html`
+						<button type="button" class="vaultcrypt-chip-btn" title="Copy to clipboard"
+						        aria-label="Copy ${filename} to clipboard"
+						        @click=${(evt: MouseEvent) => {
+									evt.stopPropagation();
+									copyAttachment();
+								}}>📋
+						</button>`
+					: html`
+						<button type="button" class="vaultcrypt-chip-btn" title="Binary file — use Save instead"
+						        aria-label="Binary file — use Save instead" disabled>📋
+						</button>`}
+				${canPreview
+					? html`
+						<button type="button" class="vaultcrypt-chip-btn vaultcrypt-chip-expand-btn"
+						        title="${isOpen ? 'Collapse preview' : 'Expand preview'}"
+						        aria-label="${isOpen ? 'Collapse preview' : 'Expand preview'}"
+						        @click=${(evt: MouseEvent) => {
+									evt.stopPropagation();
+									togglePreview();
+								}}>${isOpen ? '▼' : '▶'}
+						</button>`
+					: nothing}
+			</span>
+			${isOpen
+				? (isText
+					? buildTextPreview()
+					: isImage
+						? buildMediaPreview('image')
+						: buildMediaPreview('video'))
+				: nothing}
 		`, root);
 	}
 
@@ -158,7 +299,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		if (Platform.isDesktop) {
 			// Scope the try/catch to Electron discovery only so that a failed write
 			// surfaces an explicit error rather than silently falling back to vault.
-			
+
 			let dialog: {
 				showSaveDialog(o: { defaultPath: string }): Promise<{ canceled: boolean; filePath?: string }>
 			} | undefined;
@@ -257,6 +398,11 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			}
 			const profileLocked = plugin.vaultCryptState$().profiles.find(p => p.id === profileId)?.isLocked ?? true;
 			if (profileLocked) {
+				// Close any open preview when the profile locks so stale data isn't shown.
+				if (peek(previewOpen)) {
+					revokePreviewUrl();
+					previewOpen.set(false);
+				}
 				chipState.set('locked');
 				return;
 			}
