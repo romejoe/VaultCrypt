@@ -9,6 +9,7 @@ import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
+import {revokeAttachmentVideoCache} from './attachment-chip';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
 import {SecretStorageService} from './secret-storage-service';
 import {EditorView} from '@codemirror/view';
@@ -123,6 +124,7 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 		this.sessionService.onLock(id => {
 			this.syncProfileLockState(id, true);
+			revokeAttachmentVideoCache(id);
 			new Notice(`Profile "${id}" is locked`);
 			this.refreshAllEditorChips();
 

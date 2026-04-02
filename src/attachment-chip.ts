@@ -80,13 +80,44 @@ function getGlobalPrism(): PrismLike | undefined {
 	return (window as unknown as { Prism?: PrismLike }).Prism;
 }
 
+// ── Video element cache ──────────────────────────────────────────────────────
+// Preserves live <video> DOM elements (and their currentTime / play state)
+// across CodeMirror viewport-virtualisation cycles.  When a chip scrolls out
+// of view CM destroys the widget; when it scrolls back in a new widget is
+// created.  By stashing the <video> element here and re-inserting it we keep
+// playback uninterrupted.  Keyed by "profileId::entryPath::filename".
+
+interface VideoCacheEntry {
+	videoEl: HTMLVideoElement;
+	objectUrl: string;
+}
+
+const VIDEO_ELEMENT_CACHE = new Map<string, VideoCacheEntry>();
+
+/**
+ * Revokes all cached video blob URLs for the given profile (or all profiles
+ * when called without an argument).  Must be called on profile lock and plugin
+ * unload so that media data is not accessible after the session ends.
+ */
+export function revokeAttachmentVideoCache(profileId?: string): void {
+	for (const [key, entry] of VIDEO_ELEMENT_CACHE) {
+		if (!profileId || key.startsWith(`${profileId}::`)) {
+			URL.revokeObjectURL(entry.objectUrl);
+			VIDEO_ELEMENT_CACHE.delete(key);
+		}
+	}
+}
+
 /**
  * Builds a file chip for `{{vc:profileId/path#attachment:filename}}` tokens.
  *
  * State machine:
  *   unknown profile  →  error chip (static)
  *   profile locked   →  locked chip (click to unlock)
- *   profile unlocked →  ready chip (📎 filename [💾] [📋 text only] [▶ previewable]) or missing chip (⚠ not found)
+ *   profile unlocked →  masked chip (📎 ••••••••, click to reveal)
+ *                    ⟷  revealed chip (📎 filename [💾] [📋] [▶/▼])
+ *                        ↳  preview expanded (text / image / video inline)
+ *                        ↳  missing chip (⚠ reason) when entry/file not found
  */
 export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
@@ -96,15 +127,27 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	const isVideo = isVideoAttachment(filename);
 	const canPreview = isText || isImage || isVideo;
 
+	const cacheKey = `${profileId}::${token.entryPath}::${filename}`;
+
+	// Restore from video element cache if the chip was previously visible with
+	// the preview open (i.e. it scrolled out while playing).
+	const restoredEntry = isVideo ? VIDEO_ELEMENT_CACHE.get(cacheKey) : undefined;
+	if (restoredEntry) VIDEO_ELEMENT_CACHE.delete(cacheKey);
+
 	let effects: StopEffect[] = [];
-	let previewObjectUrl: string | null = null;
+	let previewObjectUrl: string | null = restoredEntry?.objectUrl ?? null;
+	// The live <video> element extracted from the previous chip instance.
+	let cachedVideoEl: HTMLVideoElement | null = restoredEntry?.videoEl ?? null;
 
 	const profileConfig = computed(() => plugin.settings$().profiles[profileId]);
 	const compact = computed(() => plugin.settings$().general.compactChips);
 
 	const chipState = signal<'locked' | 'unknown' | 'ready' | 'missing'>('locked');
 	const missingReason = signal<string>(`Attachment not found: ${filename}`);
-	const previewOpen = signal(false);
+	// Whether the filename and action buttons are visible (vs. showing dots).
+	const attachmentRevealed = signal(restoredEntry !== undefined);
+	// Whether the inline preview is expanded.
+	const previewOpen = signal(restoredEntry !== undefined);
 
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
@@ -116,11 +159,23 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			URL.revokeObjectURL(previewObjectUrl);
 			previewObjectUrl = null;
 		}
+		cachedVideoEl = null;
 	}
 
 	root.addEventListener(CHIP_DESTROY_EVENT, () => {
 		for (const stop of effects) stop?.();
 		effects = [];
+
+		// If a video preview is open, stash the live <video> element so that
+		// playback can resume when the chip scrolls back into view.
+		if (isVideo && previewObjectUrl && peek(previewOpen)) {
+			const videoEl = root.querySelector('video');
+			if (videoEl) {
+				VIDEO_ELEMENT_CACHE.set(cacheKey, {videoEl, objectUrl: previewObjectUrl});
+				previewObjectUrl = null; // ownership transferred to cache
+				return;
+			}
+		}
 		revokePreviewUrl();
 	});
 
@@ -141,7 +196,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	});
 
 	function resolveAttachmentState(): 'ready' | 'missing' {
-		// Distinguish entry-not-found from attachment-not-found for a clearer error message.
 		const entryFields = plugin.sessionService?.getEntryFields(profileId, token.entryPath);
 		if (entryFields === null || entryFields === undefined) {
 			missingReason.set(`Entry not found: ${token.entryPath}`);
@@ -203,6 +257,15 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		const mime = type === 'image'
 			? (IMAGE_MIME_TYPES[ext] ?? 'image/png')
 			: (VIDEO_MIME_TYPES[ext] ?? 'video/mp4');
+
+		if (type === 'video' && cachedVideoEl) {
+			// Re-insert the same <video> DOM node — browser preserves currentTime
+			// and play/pause state when a node is removed then reinserted.
+			const el = cachedVideoEl;
+			cachedVideoEl = null; // consume; previewObjectUrl already set
+			return html`<div class="vaultcrypt-attachment-preview">${el}</div>`;
+		}
+
 		if (!previewObjectUrl) {
 			previewObjectUrl = URL.createObjectURL(new Blob([data], {type: mime}));
 		}
@@ -219,23 +282,61 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 	function renderLocked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
 		render(html`
-			<button type="button" class="vaultcrypt-chip-btn" aria-label="Unlock ${profileId}"
-			        @click=${(evt: MouseEvent) => {
-						evt.stopPropagation();
-						new UnlockModal(plugin.app, plugin, profileId, () => {
-							chipState.set(resolveAttachmentState());
-						}).open();
-					}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}
-			</button>
+			<span @click=${(evt: MouseEvent) => {
+				evt.stopPropagation();
+				new UnlockModal(plugin.app, plugin, profileId, () => {
+					chipState.set(resolveAttachmentState());
+				}).open();
+			}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</span>
 		`, root);
 	}
 
 	function renderReady() {
 		const isOpen = previewOpen();
+		const isRevealed = attachmentRevealed();
+
+		if (!isRevealed) {
+			// Masked — mirrors the regular chip's masked state exactly
+			root.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
+			const onReveal = (evt: MouseEvent) => {
+				evt.stopPropagation();
+				attachmentRevealed.set(true);
+			};
+			render(html`
+				<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-locked"
+				      @click=${onReveal}>🔒</span>
+				<span class="vaultcrypt-chip-dots"
+				      @click=${onReveal}>••••••••</span>
+				${isText ? html`
+					<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+					        @mousedown=${(evt: MouseEvent) => {
+								evt.preventDefault();
+								evt.stopPropagation();
+							}}
+					        @click=${(evt: MouseEvent) => {
+								evt.stopPropagation();
+								copyAttachment();
+							}}>📋</button>
+				` : nothing}
+			`, root);
+			return;
+		}
+
 		root.className = `vaultcrypt-chip vaultcrypt-chip-file${isOpen ? ' vaultcrypt-chip-expanded' : ''}`;
+
+		// Revealed state — show filename and action buttons
 		render(html`
 			<span class="vaultcrypt-chip-file-row">
-				<span class="vaultcrypt-chip-icon">📎</span>
+				<span class="vaultcrypt-chip-icon" title="Mask attachment"
+				      style="cursor:pointer"
+				      @click=${(evt: MouseEvent) => {
+						evt.stopPropagation();
+						if (isOpen) {
+							revokePreviewUrl();
+							previewOpen.set(false);
+						}
+						attachmentRevealed.set(false);
+					}}>📎</span>
 				<span class="vaultcrypt-chip-value">${filename}</span>
 				<button type="button" class="vaultcrypt-chip-btn" title="Save attachment"
 				        aria-label="Save attachment ${filename}"
@@ -294,12 +395,8 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return;
 		}
 
-
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
-			// Scope the try/catch to Electron discovery only so that a failed write
-			// surfaces an explicit error rather than silently falling back to vault.
-
 			let dialog: {
 				showSaveDialog(o: { defaultPath: string }): Promise<{ canceled: boolean; filePath?: string }>
 			} | undefined;
@@ -341,7 +438,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 					return;
 				}
 			} catch (err) {
-				// User cancelled share or share failed; fall through to vault save.
 				if (err instanceof Error && err.name === 'AbortError') return;
 			}
 		}
@@ -358,7 +454,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			try {
 				await adapter.mkdir(dir);
 			} catch (e) {
-				// Ignore "directory already exists"; propagate real errors (permissions, disk full, etc.)
 				if (!(e instanceof Error && e.message.includes('EEXIST'))) throw e;
 			}
 			await adapter.writeBinary(savePath, data);
@@ -398,16 +493,26 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			}
 			const profileLocked = plugin.vaultCryptState$().profiles.find(p => p.id === profileId)?.isLocked ?? true;
 			if (profileLocked) {
-				// Close any open preview when the profile locks so stale data isn't shown.
+				// Close preview and mask on lock so stale data is not shown.
 				if (peek(previewOpen)) {
 					revokePreviewUrl();
 					previewOpen.set(false);
 				}
+				attachmentRevealed.set(false);
 				chipState.set('locked');
 				return;
 			}
 			if (peek(chipState) === 'locked' || peek(chipState) === 'unknown') {
-				chipState.set(resolveAttachmentState());
+				const newState = resolveAttachmentState();
+				if (newState === 'ready') {
+					if (canPreview && plugin.settings.general.autoPreviewAttachments) {
+						attachmentRevealed.set(true);
+						previewOpen.set(true);
+					} else if (plugin.settings.general.autoUnmask) {
+						attachmentRevealed.set(true);
+					}
+				}
+				chipState.set(newState);
 			}
 		}),
 
