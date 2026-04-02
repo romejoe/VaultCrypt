@@ -6,5 +6,6 @@
 	"description": "Inline encryption for Obsidian notes using KeePass-compatible (.kdbx) storage",
 	"author": "romejoe",
 	"authorUrl": "https://github.com/romejoe",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"fundingUrl": "https://github.com/sponsors/romejoe"
 }
