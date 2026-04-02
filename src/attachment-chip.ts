@@ -171,6 +171,11 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		if (isVideo && previewObjectUrl && peek(previewOpen)) {
 			const videoEl = root.querySelector('video');
 			if (videoEl) {
+				// Revoke any previously cached entry for this key (e.g. a second
+				// chip instance for the same token) before overwriting.
+				const displaced = VIDEO_ELEMENT_CACHE.get(cacheKey);
+				if (displaced) URL.revokeObjectURL(displaced.objectUrl);
+				videoEl.remove(); // detach from chip DOM so old subtree can be GC'd
 				VIDEO_ELEMENT_CACHE.set(cacheKey, {videoEl, objectUrl: previewObjectUrl});
 				previewObjectUrl = null; // ownership transferred to cache
 				return;
@@ -225,14 +230,24 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		}
 		const isLarge = data.byteLength > MAX_PREVIEW_BYTES;
 		const cap = isLarge ? MAX_PREVIEW_BYTES : data.byteLength;
-		// Back off up to 3 bytes so we never cut a multi-byte UTF-8 sequence.
 		let text: string | null = null;
-		for (let trim = 0; trim <= 3; trim++) {
+		if (isLarge) {
+			// Back off up to 3 bytes so we never cut a multi-byte UTF-8 sequence
+			// at the truncation boundary.
+			for (let trim = 0; trim <= 3; trim++) {
+				try {
+					text = new TextDecoder('utf-8', {fatal: true}).decode(data.slice(0, cap - trim));
+					break;
+				} catch {
+					// try shorter slice
+				}
+			}
+		} else {
+			// Full content — single decode attempt; no boundary splitting possible.
 			try {
-				text = new TextDecoder('utf-8', {fatal: true}).decode(data.slice(0, cap - trim));
-				break;
+				text = new TextDecoder('utf-8', {fatal: true}).decode(data.slice(0, cap));
 			} catch {
-				// try shorter slice
+				// not valid UTF-8
 			}
 		}
 		if (text === null) {
