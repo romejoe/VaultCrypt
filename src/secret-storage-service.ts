@@ -127,6 +127,7 @@ export class SecretStorageService {
 							settings.masterKeyringPath, savedKeyringPw, managedLocked,
 						);
 						for (const [profileId, profilePassword] of passwords) {
+							if (sessionService.isUnlocked(profileId)) continue;
 							const config = settings.profiles[profileId];
 							if (!config) continue;
 							try {
