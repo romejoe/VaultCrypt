@@ -330,52 +330,10 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
 
-			// Auto-unlock via saved passwords when the setting is enabled
 			if (settings.security.autoUnlock) {
-				// Auto-unlock via saved keyring password (covers keyring-managed profiles)
-				if (settings.keyringEnabled) {
-					const savedKeyringPw = this.secretStorageService.loadKeyringPassword();
-					if (savedKeyringPw) {
-						const managedLocked = [...lockedProfileIds].filter(
-							id => settings.profiles[id]?.managedByKeyring
-						);
-						if (managedLocked.length > 0) {
-							try {
-								const passwords = await this.keyringService.getProfilePasswords(
-									settings.masterKeyringPath, savedKeyringPw, managedLocked,
-								);
-								for (const [profileId, profilePassword] of passwords) {
-									const config = settings.profiles[profileId];
-									if (!config) continue;
-									try {
-										await this.sessionService.unlockProfile(profileId, config, profilePassword);
-										lockedProfileIds.delete(profileId);
-									} catch {
-										// Stale keyring entry — leave profile in locked set to prompt manually
-									}
-								}
-							} catch {
-								// Saved keyring password is wrong — forget it and fall through to manual prompt
-								this.secretStorageService.forgetKeyringPassword();
-							}
-						}
-					}
-				}
-
-				// Auto-unlock non-keyring profiles via saved individual passwords
-				for (const profileId of [...lockedProfileIds]) {
-					if (settings.profiles[profileId]?.managedByKeyring) continue;
-					const savedPw = this.secretStorageService.loadProfilePassword(profileId);
-					if (!savedPw) continue;
-					try {
-						const config = settings.profiles[profileId]!;
-						await this.sessionService.unlockProfile(profileId, config, savedPw);
-						lockedProfileIds.delete(profileId);
-					} catch {
-						// Saved password no longer valid (e.g. password changed externally) — forget it
-						this.secretStorageService.forgetProfilePassword(profileId);
-					}
-				}
+				await this.secretStorageService.autoUnlockProfiles(
+					settings, lockedProfileIds, this.sessionService, this.keyringService,
+				);
 			}
 
 			// Check if any remaining locked profiles are keyring-managed

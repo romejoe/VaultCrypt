@@ -1,4 +1,4 @@
-import {App, ButtonComponent, Modal, Setting, ToggleComponent} from 'obsidian';
+import {App, ButtonComponent, Modal, Notice, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
 
 export class UnlockModal extends Modal {
@@ -230,19 +230,17 @@ export class UnlockModal extends Modal {
 					return;
 				}
 				// Save or forget the keyring password based on the remember toggle
-				if (remember) {
-					this.plugin.secretStorageService.saveKeyringPassword(submittedPassword);
-				} else {
-					this.plugin.secretStorageService.forgetKeyringPassword();
-				}
+				const kSaved = remember
+					? this.plugin.secretStorageService.saveKeyringPassword(submittedPassword)
+					: this.plugin.secretStorageService.forgetKeyringPassword();
+				if (!kSaved) new Notice('Could not update saved keyring password in secret storage.');
 			} else {
 				await this.plugin.sessionService.unlockProfile(profileId, config, submittedPassword);
 				// Save or forget the profile password based on the remember toggle
-				if (remember) {
-					this.plugin.secretStorageService.saveProfilePassword(profileId, submittedPassword);
-				} else {
-					this.plugin.secretStorageService.forgetProfilePassword(profileId);
-				}
+				const pSaved = remember
+					? this.plugin.secretStorageService.saveProfilePassword(profileId, submittedPassword)
+					: this.plugin.secretStorageService.forgetProfilePassword(profileId);
+				if (!pSaved) new Notice('Could not update saved password in secret storage.');
 			}
 			this.close();
 			this.onDone?.(profileId);

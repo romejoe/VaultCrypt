@@ -239,11 +239,10 @@ export class KeyringUnlockModal extends Modal {
 				new Notice(`Unlocked ${unlocked} profile${unlocked !== 1 ? 's' : ''} via keyring.`);
 			}
 
-			if (remember) {
-				this.plugin.secretStorageService.saveKeyringPassword(submittedPassword);
-			} else {
-				this.plugin.secretStorageService.forgetKeyringPassword();
-			}
+			const saved = remember
+				? this.plugin.secretStorageService.saveKeyringPassword(submittedPassword)
+				: this.plugin.secretStorageService.forgetKeyringPassword();
+			if (!saved) new Notice('Could not update saved keyring password in secret storage.');
 
 			this.close();
 			this.onDone?.();
@@ -605,14 +604,21 @@ export class ChangeKeyringPasswordModal extends Modal {
 			return;
 		}
 
+		const submittedNewPassword = this.newPassword;
+
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.keyringService.changeMasterPassword(
 				this.plugin.settings.masterKeyringPath,
 				this.currentPassword,
-				this.newPassword,
+				submittedNewPassword,
 			);
+			// Keep saved secret in sync: if a keyring password was remembered,
+			// overwrite it with the new password so auto-unlock keeps working.
+			if (this.plugin.secretStorageService.hasKeyringPassword()) {
+				this.plugin.secretStorageService.saveKeyringPassword(submittedNewPassword);
+			}
 			new Notice("Keyring password changed successfully.");
 			this.close();
 			this.onDone();

@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
+import {App, Notice, PluginSettingTab, Setting} from "obsidian";
 import VaultCryptPlugin from "./main";
 import {KdbxVersion} from "./kdbx-service";
 import {
@@ -118,7 +118,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 					setting.addButton(btn => btn
 						.setButtonText("Forget saved password")
 						.onClick(() => {
-							this.plugin.secretStorageService.forgetProfilePassword(name);
+							const ok = this.plugin.secretStorageService.forgetProfilePassword(name);
+							if (!ok) new Notice('Could not clear saved password from secret storage.');
 							this.display();
 						}));
 				}
@@ -157,7 +158,8 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				keyringActions.addButton(btn => btn
 					.setButtonText("Forget saved password")
 					.onClick(() => {
-						this.plugin.secretStorageService.forgetKeyringPassword();
+						const ok = this.plugin.secretStorageService.forgetKeyringPassword();
+						if (!ok) new Notice('Could not clear saved keyring password from secret storage.');
 						this.display();
 					}));
 			}
