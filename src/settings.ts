@@ -22,6 +22,7 @@ export interface VaultCryptSettings {
 	security: {
 		autoLockTimeout: number;
 		clipboardClearSeconds: number;
+		autoUnlock: boolean;
 	};
 	general: {
 		vaultCryptDir: string;
@@ -38,7 +39,8 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 	keyringEnabled: false,
 	security: {
 		autoLockTimeout: 300,
-		clipboardClearSeconds: 30
+		clipboardClearSeconds: 30,
+		autoUnlock: false,
 	},
 	general: {
 		vaultCryptDir: ".vaultcrypt",
@@ -111,6 +113,15 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 						.setButtonText("Remove from keyring")
 						.onClick(() => new RemoveFromKeyringModal(this.app, this.plugin, name, () => this.display()).open()));
 				}
+
+				if (this.plugin.secretStorageService.hasProfilePassword(name)) {
+					setting.addButton(btn => btn
+						.setButtonText("Forget saved password")
+						.onClick(() => {
+							this.plugin.secretStorageService.forgetProfilePassword(name);
+							this.display();
+						}));
+				}
 			}
 		}
 
@@ -130,7 +141,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.setName("Keyring active")
 				.setDesc(`Keyring file: ${this.plugin.settings.masterKeyringPath}`);
 
-			new Setting(containerEl)
+			const keyringActions = new Setting(containerEl)
 				.addButton(btn => btn
 					.setButtonText("Add profile to keyring")
 					.onClick(() => new AddToKeyringModal(this.app, this.plugin, () => this.display()).open()))
@@ -141,6 +152,15 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 					.setButtonText("Delete keyring")
 					.setWarning()
 					.onClick(() => new DeleteKeyringModal(this.app, this.plugin, () => this.display()).open()));
+
+			if (this.plugin.secretStorageService.hasKeyringPassword()) {
+				keyringActions.addButton(btn => btn
+					.setButtonText("Forget saved password")
+					.onClick(() => {
+						this.plugin.secretStorageService.forgetKeyringPassword();
+						this.display();
+					}));
+			}
 		}
 
 		// Security section
@@ -182,6 +202,17 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 						});
 					});
 			});
+
+		new Setting(containerEl)
+			.setName('Auto-unlock on file open')
+			.setDesc('When opening a note, automatically unlock profiles using saved passwords. Requires "Remember password" to be enabled when unlocking.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.security.autoUnlock)
+				.onChange((value) => {
+					this.plugin.patchSettings(s => {
+						s.security.autoUnlock = value;
+					});
+				}));
 
 		// General section
 		// eslint-disable-next-line obsidianmd/settings-tab/no-problematic-settings-headings

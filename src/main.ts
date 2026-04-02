@@ -10,6 +10,7 @@ import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
+import {SecretStorageService} from './secret-storage-service';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -79,6 +80,7 @@ export default class VaultCryptPlugin extends Plugin {
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
 	keyringService!: KeyringService;
+	secretStorageService!: SecretStorageService;
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
@@ -92,6 +94,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// KdbxService must be instantiated first — its constructor registers the
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
+		this.secretStorageService = new SecretStorageService(this.app);
 		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
 		this.keyringService = new KeyringService(this.app.vault.adapter);
 		this.profileService = new ProfileService(
@@ -326,7 +329,56 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter((profileId): profileId is string => !!profileId)
 					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
-			// Check if any locked profiles are keyring-managed
+
+			// Auto-unlock via saved passwords when the setting is enabled
+			if (settings.security.autoUnlock) {
+				// Auto-unlock via saved keyring password (covers keyring-managed profiles)
+				if (settings.keyringEnabled) {
+					const savedKeyringPw = this.secretStorageService.loadKeyringPassword();
+					if (savedKeyringPw) {
+						const managedLocked = [...lockedProfileIds].filter(
+							id => settings.profiles[id]?.managedByKeyring
+						);
+						if (managedLocked.length > 0) {
+							try {
+								const passwords = await this.keyringService.getProfilePasswords(
+									settings.masterKeyringPath, savedKeyringPw, managedLocked,
+								);
+								for (const [profileId, profilePassword] of passwords) {
+									const config = settings.profiles[profileId];
+									if (!config) continue;
+									try {
+										await this.sessionService.unlockProfile(profileId, config, profilePassword);
+										lockedProfileIds.delete(profileId);
+									} catch {
+										// Stale keyring entry — leave profile in locked set to prompt manually
+									}
+								}
+							} catch {
+								// Saved keyring password is wrong — forget it and fall through to manual prompt
+								this.secretStorageService.forgetKeyringPassword();
+							}
+						}
+					}
+				}
+
+				// Auto-unlock non-keyring profiles via saved individual passwords
+				for (const profileId of [...lockedProfileIds]) {
+					if (settings.profiles[profileId]?.managedByKeyring) continue;
+					const savedPw = this.secretStorageService.loadProfilePassword(profileId);
+					if (!savedPw) continue;
+					try {
+						const config = settings.profiles[profileId]!;
+						await this.sessionService.unlockProfile(profileId, config, savedPw);
+						lockedProfileIds.delete(profileId);
+					} catch {
+						// Saved password no longer valid (e.g. password changed externally) — forget it
+						this.secretStorageService.forgetProfilePassword(profileId);
+					}
+				}
+			}
+
+			// Check if any remaining locked profiles are keyring-managed
 			const hasLockedManagedProfiles = [...lockedProfileIds].some(
 				id => settings.profiles[id]?.managedByKeyring
 			);
@@ -484,6 +536,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// Lock the profile before deletion so it's wiped from memory
 		this.sessionService.lockProfile(key);
 		await this.profileService.deleteProfile(name, deleteFile);
+		this.secretStorageService.forgetProfilePassword(key);
 		this.initRuntimeState();
 	}
 
