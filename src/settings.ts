@@ -205,6 +205,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Auto-unlock on file open')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('When opening a note, automatically unlock profiles using saved passwords. Requires "Remember password" to be enabled when unlocking.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.security.autoUnlock)
