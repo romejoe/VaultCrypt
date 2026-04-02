@@ -327,6 +327,9 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			const onReveal = (evt: Event) => {
 				evt.stopPropagation();
 				attachmentRevealed.set(true);
+				if (canPreview && plugin.settings$().general.autoPreviewAttachments) {
+					previewOpen.set(true);
+				}
 			};
 			const onRevealKey = (evt: KeyboardEvent) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); onReveal(evt); } };
 			render(html`
