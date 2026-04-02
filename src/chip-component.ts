@@ -305,6 +305,10 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 			<span class="vaultcrypt-chip-dots"
 				@click=${onReveal}>••••••••</span>
 			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				@mousedown=${(evt: MouseEvent) => {
+					evt.preventDefault();
+					evt.stopPropagation();
+				}}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					copyField(profileId, token.entryPath, peek(field), plugin);
@@ -367,6 +371,10 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					}}>${showSaved ? '✅' : '✏️'}</button>
 			` : nothing}
 			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
+				@mousedown=${(evt: MouseEvent) => {
+					evt.preventDefault();
+					evt.stopPropagation();
+				}}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					copyField(profileId, token.entryPath, peek(field), plugin);
