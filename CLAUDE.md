@@ -17,7 +17,7 @@ npm run release      # npm version minor + git push + push tags
 
 ## Architecture
 
-VaultCrypt is an Obsidian plugin for inline encryption of sensitive values using KeePass-compatible `.kdbx` databases. Users reference secrets in markdown with tokens like `{{vc:profileId/path/to/entry#fieldName}}`, which render as interactive "chips" without exposing plaintext in notes.
+VaultCrypt is an Obsidian plugin for inline encryption of sensitive values using KeePass-compatible `.kdbx` databases. Users reference secrets in Markdown with tokens like `{{vc:profileId/path/to/entry#fieldName}}`, which render as interactive "chips" without exposing plaintext in notes.
 
 ### State Management
 
@@ -59,7 +59,7 @@ Effects on these signals update editor decorations and the status bar automatica
 - Argon2id KDF for KDBX v4 (3 iterations, 65536 KiB memory); AES KDF for v3 (600k iterations)
 - Password fields wrapped in `ProtectedValue` (kdbxweb); never stored as plaintext
 - Clipboard auto-clear timeout; no vault contents in settings or logs
-- All listeners/intervals use `this.register*` helpers for safe cleanup on unload
+- Plugin-level listeners/intervals should use `this.register*` helpers for safe cleanup on unload; component-local listeners must be explicitly cleaned up
 
 ## Key Conventions
 
