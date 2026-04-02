@@ -10,6 +10,7 @@ import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
+import {SecretStorageService} from './secret-storage-service';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -79,6 +80,7 @@ export default class VaultCryptPlugin extends Plugin {
 	profileService!: ProfileService;
 	sessionService!: UnlockSessionService;
 	keyringService!: KeyringService;
+	secretStorageService!: SecretStorageService;
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
@@ -92,6 +94,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// KdbxService must be instantiated first — its constructor registers the
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
 		this.kdbxService = new KdbxService(this.app.vault.adapter);
+		this.secretStorageService = new SecretStorageService(this.app);
 		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
 		this.keyringService = new KeyringService(this.app.vault.adapter);
 		this.profileService = new ProfileService(
@@ -326,7 +329,14 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter((profileId): profileId is string => !!profileId)
 					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
-			// Check if any locked profiles are keyring-managed
+
+			if (settings.security.autoUnlock) {
+				await this.secretStorageService.autoUnlockProfiles(
+					settings, lockedProfileIds, this.sessionService, this.keyringService,
+				);
+			}
+
+			// Check if any remaining locked profiles are keyring-managed
 			const hasLockedManagedProfiles = [...lockedProfileIds].some(
 				id => settings.profiles[id]?.managedByKeyring
 			);
@@ -484,6 +494,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// Lock the profile before deletion so it's wiped from memory
 		this.sessionService.lockProfile(key);
 		await this.profileService.deleteProfile(name, deleteFile);
+		this.secretStorageService.forgetProfilePassword(key);
 		this.initRuntimeState();
 	}
 

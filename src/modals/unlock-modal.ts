@@ -1,4 +1,4 @@
-import {App, ButtonComponent, Modal, Setting, ToggleComponent} from 'obsidian';
+import {App, ButtonComponent, Modal, Notice, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
 
 export class UnlockModal extends Modal {
@@ -6,9 +6,11 @@ export class UnlockModal extends Modal {
 	private selectedProfileId: string;
 	private password = "";
 	private useKeyring = false;
+	private rememberPassword = false;
 	private keyringToggleSetting: Setting | null = null;
 	private passwordSetting!: Setting;
 	private passwordInputEl!: HTMLInputElement;
+	private rememberToggle: ToggleComponent | null = null;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
@@ -62,6 +64,8 @@ export class UnlockModal extends Modal {
 				dd.setValue(this.selectedProfileId).onChange(value => {
 					this.selectedProfileId = value;
 					this.updateKeyringSection();
+					this.clearPassword();
+					this.refreshSavedPasswordState();
 				});
 			});
 
@@ -75,6 +79,7 @@ export class UnlockModal extends Modal {
 							this.useKeyring = value;
 							this.clearPassword();
 							this.updatePasswordLabel();
+							this.refreshSavedPasswordState();
 						});
 				});
 		}
@@ -98,6 +103,16 @@ export class UnlockModal extends Modal {
 				});
 			});
 
+		new Setting(contentEl)
+			.setName("Remember password")
+			.setDesc("Save the password in Obsidian's secure secret storage")
+			.addToggle(toggle => {
+				this.rememberToggle = toggle;
+				toggle.setValue(false).onChange(value => {
+					this.rememberPassword = value;
+				});
+			});
+
 		this.errorEl = contentEl.createEl("p", {cls: "mod-warning"});
 		this.errorEl.addClass("vaultcrypt-hidden");
 
@@ -111,6 +126,7 @@ export class UnlockModal extends Modal {
 			});
 
 		this.updateKeyringSection();
+		this.refreshSavedPasswordState();
 	}
 
 	private isSelectedProfileKeyringManaged(): boolean {
@@ -136,7 +152,24 @@ export class UnlockModal extends Modal {
 
 	private clearPassword() {
 		this.password = "";
-		this.passwordInputEl.value = "";
+		if (this.passwordInputEl) this.passwordInputEl.value = "";
+	}
+
+	/** Pre-fills the password field and remember toggle from SecretStorage. */
+	private refreshSavedPasswordState() {
+		const svc = this.plugin.secretStorageService;
+		const saved = this.useKeyring
+			? svc.loadKeyringPassword()
+			: (this.selectedProfileId ? svc.loadProfilePassword(this.selectedProfileId) : null);
+
+		if (saved) {
+			this.password = saved;
+			this.passwordInputEl.value = saved;
+			this.rememberPassword = true;
+		} else {
+			this.rememberPassword = false;
+		}
+		this.rememberToggle?.setValue(this.rememberPassword);
 	}
 
 	private showError(msg: string) {
@@ -160,6 +193,7 @@ export class UnlockModal extends Modal {
 		const profileId = this.selectedProfileId;
 		const submittedPassword = this.password;
 		const useKeyring = this.useKeyring;
+		const remember = this.rememberPassword;
 
 		const config = this.plugin.settings.profiles[profileId];
 		if (!config) {
@@ -195,8 +229,18 @@ export class UnlockModal extends Modal {
 					this.showError("Stored profile password is incorrect or corrupted.");
 					return;
 				}
+				// Save or forget the keyring password based on the remember toggle
+				const kSaved = remember
+					? this.plugin.secretStorageService.saveKeyringPassword(submittedPassword)
+					: this.plugin.secretStorageService.forgetKeyringPassword();
+				if (!kSaved) new Notice('Could not update saved keyring password in secret storage.');
 			} else {
 				await this.plugin.sessionService.unlockProfile(profileId, config, submittedPassword);
+				// Save or forget the profile password based on the remember toggle
+				const pSaved = remember
+					? this.plugin.secretStorageService.saveProfilePassword(profileId, submittedPassword)
+					: this.plugin.secretStorageService.forgetProfilePassword(profileId);
+				if (!pSaved) new Notice('Could not update saved password in secret storage.');
 			}
 			this.close();
 			this.onDone?.(profileId);

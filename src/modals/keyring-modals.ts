@@ -1,4 +1,4 @@
-import {App, ButtonComponent, Modal, Notice, Setting} from 'obsidian';
+import {App, ButtonComponent, Modal, Notice, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin, {VaultCryptState} from '../main';
 import {VaultCryptSettings} from '../settings';
 import {peek} from '@maverick-js/signals';
@@ -117,6 +117,9 @@ export class SetupKeyringModal extends Modal {
 export class KeyringUnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
 	private password = "";
+	private rememberPassword = false;
+	private rememberToggle: ToggleComponent | null = null;
+	private passwordInputEl!: HTMLInputElement;
 	private errorEl!: HTMLParagraphElement;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
@@ -144,12 +147,23 @@ export class KeyringUnlockModal extends Modal {
 			.addText(text => {
 				text.inputEl.type = "password";
 				text.inputEl.focus();
+				this.passwordInputEl = text.inputEl;
 				text.setPlaceholder("Enter keyring master password")
 					.onChange(value => {
 						this.password = value;
 					});
 				text.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
 					if (evt.key === "Enter") void this.submit();
+				});
+			});
+
+		new Setting(contentEl)
+			.setName("Remember password")
+			.setDesc("Save the keyring password in Obsidian's secure secret storage")
+			.addToggle(toggle => {
+				this.rememberToggle = toggle;
+				toggle.setValue(false).onChange(value => {
+					this.rememberPassword = value;
 				});
 			});
 
@@ -164,6 +178,15 @@ export class KeyringUnlockModal extends Modal {
 					.setCta()
 					.onClick(() => this.submit());
 			});
+
+		// Pre-fill from SecretStorage if a keyring password was previously saved
+		const savedPw = this.plugin.secretStorageService.loadKeyringPassword();
+		if (savedPw) {
+			this.password = savedPw;
+			this.passwordInputEl.value = savedPw;
+			this.rememberPassword = true;
+			this.rememberToggle?.setValue(true);
+		}
 	}
 
 	private showError(msg: string) {
@@ -178,6 +201,9 @@ export class KeyringUnlockModal extends Modal {
 			return;
 		}
 
+		const submittedPassword = this.password;
+		const remember = this.rememberPassword;
+
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
@@ -189,7 +215,7 @@ export class KeyringUnlockModal extends Modal {
 
 			const passwords = await this.plugin.keyringService.getProfilePasswords(
 				settings.masterKeyringPath,
-				this.password,
+				submittedPassword,
 				managedIds,
 			);
 
@@ -212,6 +238,11 @@ export class KeyringUnlockModal extends Modal {
 			if (unlocked > 0) {
 				new Notice(`Unlocked ${unlocked} profile${unlocked !== 1 ? 's' : ''} via keyring.`);
 			}
+
+			const saved = remember
+				? this.plugin.secretStorageService.saveKeyringPassword(submittedPassword)
+				: this.plugin.secretStorageService.forgetKeyringPassword();
+			if (!saved) new Notice('Could not update saved keyring password in secret storage.');
 
 			this.close();
 			this.onDone?.();
@@ -573,14 +604,21 @@ export class ChangeKeyringPasswordModal extends Modal {
 			return;
 		}
 
+		const submittedNewPassword = this.newPassword;
+
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
 			await this.plugin.keyringService.changeMasterPassword(
 				this.plugin.settings.masterKeyringPath,
 				this.currentPassword,
-				this.newPassword,
+				submittedNewPassword,
 			);
+			// Keep saved secret in sync: if a keyring password was remembered,
+			// overwrite it with the new password so auto-unlock keeps working.
+			if (this.plugin.secretStorageService.hasKeyringPassword()) {
+				this.plugin.secretStorageService.saveKeyringPassword(submittedNewPassword);
+			}
 			new Notice("Keyring password changed successfully.");
 			this.close();
 			this.onDone();
@@ -672,6 +710,7 @@ export class DeleteKeyringModal extends Modal {
 
 			// Delete the file
 			await this.plugin.keyringService.deleteKeyring(this.plugin.settings.masterKeyringPath);
+			this.plugin.secretStorageService.forgetKeyringPassword();
 
 			// Reset settings
 			this.plugin.patchSettings((s: VaultCryptSettings) => {
