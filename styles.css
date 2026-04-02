@@ -331,3 +331,80 @@ If your plugin does not need CSS, delete this file.
 .vaultcrypt-insert-locked-warning-show {
 	display: flex;
 }
+
+/* ── Attachment preview ─────────────────────────────────────────────────────── */
+
+/* Header row (icon + filename + action buttons) inside an attachment chip */
+.vaultcrypt-chip-file-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+/* When preview is open the chip switches to block so the preview renders below */
+.vaultcrypt-chip-expanded {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: flex-start;
+	white-space: normal;
+}
+
+/* Outer container for any preview content (text, image, video) */
+.vaultcrypt-attachment-preview {
+	display: block;
+	width: 100%;
+	margin-top: 4px;
+}
+
+/* Code block for text previews */
+.vaultcrypt-preview-code {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 8px;
+	font-family: var(--font-monospace);
+	font-size: 0.82em;
+	line-height: 1.5;
+	white-space: pre;
+	overflow: auto;
+	max-height: 300px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	box-sizing: border-box;
+}
+
+/* Inline image */
+.vaultcrypt-preview-image {
+	display: block;
+	max-width: 100%;
+	max-height: 300px;
+	border-radius: var(--radius-s);
+	object-fit: contain;
+}
+
+/* Inline video */
+.vaultcrypt-preview-video {
+	display: block;
+	max-width: 100%;
+	max-height: 300px;
+	border-radius: var(--radius-s);
+}
+
+/* Truncation notice shown when file exceeds 10 KB */
+.vaultcrypt-preview-truncated {
+	margin: 4px 0 0;
+	font-size: 0.82em;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* Error message inside preview area */
+.vaultcrypt-preview-error {
+	padding: 4px 8px;
+	font-size: 0.85em;
+	color: var(--text-warning);
+	background: rgba(var(--color-orange-rgb), 0.1);
+	border-radius: var(--radius-s);
+}

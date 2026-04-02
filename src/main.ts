@@ -9,6 +9,7 @@ import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
 import {buildChipElement} from './chip-component';
+import {revokeAttachmentVideoCache} from './attachment-chip';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
 import {SecretStorageService} from './secret-storage-service';
 import {EditorView} from '@codemirror/view';
@@ -135,6 +136,9 @@ export default class VaultCryptPlugin extends Plugin {
 					}
 				}));
 			});
+
+			// Revoke after chips are destroyed/refreshed so no widget can re-add to cache.
+			revokeAttachmentVideoCache(id);
 		});
 
 		// Ribbon icon → unlock modal (prefers keyring when available)

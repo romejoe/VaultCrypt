@@ -30,6 +30,7 @@ export interface VaultCryptSettings {
 		compactChips: boolean;
 		autoUnmask: boolean;
 		saveOnBlur: boolean;
+		autoPreviewAttachments: boolean;
 	};
 }
 
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		compactChips: false,
 		autoUnmask: false,
 		saveOnBlur: true,
+		autoPreviewAttachments: false,
 	}
 };
 
@@ -253,6 +255,17 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 				.onChange((value) => {
 					this.plugin.patchSettings(s => {
 						s.general.autoUnmask = value;
+					});
+				}));
+
+		new Setting(containerEl)
+			.setName('Auto-preview attachments')
+			.setDesc('Automatically expand the inline preview when an attachment chip loads')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.general.autoPreviewAttachments)
+				.onChange((value) => {
+					this.plugin.patchSettings(s => {
+						s.general.autoPreviewAttachments = value;
 					});
 				}));
 
