@@ -24,7 +24,7 @@ function sanitizeVaultSegment(value: string): string {
 const TEXT_EXTENSIONS = new Set([
 	'.txt', '.md', '.pem', '.crt', '.cer', '.key', '.pub', '.csr',
 	'.json', '.xml', '.csv', '.yaml', '.yml', '.toml', '.ini', '.conf',
-	'.log', '.sh', '.env', '.p7b', '.p7c',
+	'.log', '.sh', '.env', '.p7b', '.p7c', '.html', '.css',
 ]);
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -224,11 +224,18 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 			return html`<div class="vaultcrypt-preview-error">Attachment not available.</div>`;
 		}
 		const isLarge = data.byteLength > MAX_PREVIEW_BYTES;
-		const slice = isLarge ? data.slice(0, MAX_PREVIEW_BYTES) : data;
-		let text: string;
-		try {
-			text = new TextDecoder('utf-8', {fatal: true}).decode(slice);
-		} catch {
+		const cap = isLarge ? MAX_PREVIEW_BYTES : data.byteLength;
+		// Back off up to 3 bytes so we never cut a multi-byte UTF-8 sequence.
+		let text: string | null = null;
+		for (let trim = 0; trim <= 3; trim++) {
+			try {
+				text = new TextDecoder('utf-8', {fatal: true}).decode(data.slice(0, cap - trim));
+				break;
+			} catch {
+				// try shorter slice
+			}
+		}
+		if (text === null) {
 			return html`<div class="vaultcrypt-preview-error">Cannot display: not valid UTF-8.</div>`;
 		}
 		const lang = prismLang(filename);
@@ -281,13 +288,17 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 	function renderLocked() {
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
+		const openUnlock = (evt: Event) => {
+			evt.stopPropagation();
+			new UnlockModal(plugin.app, plugin, profileId, () => {
+				chipState.set(resolveAttachmentState());
+			}).open();
+		};
 		render(html`
-			<span @click=${(evt: MouseEvent) => {
-				evt.stopPropagation();
-				new UnlockModal(plugin.app, plugin, profileId, () => {
-					chipState.set(resolveAttachmentState());
-				}).open();
-			}}>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</span>
+			<span role="button" tabindex="0" aria-label="Unlock ${profileId}"
+			      @click=${openUnlock}
+			      @keydown=${(evt: KeyboardEvent) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); openUnlock(evt); } }}
+			>${compact() ? '🔒 ••••••••' : `🔒 ${profileId}/${token.entryPath}#${token.fieldName}`}</span>
 		`, root);
 	}
 
@@ -298,15 +309,18 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		if (!isRevealed) {
 			// Masked — mirrors the regular chip's masked state exactly
 			root.className = 'vaultcrypt-chip vaultcrypt-chip-masked';
-			const onReveal = (evt: MouseEvent) => {
+			const onReveal = (evt: Event) => {
 				evt.stopPropagation();
 				attachmentRevealed.set(true);
 			};
+			const onRevealKey = (evt: KeyboardEvent) => { if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); onReveal(evt); } };
 			render(html`
 				<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-locked"
-				      @click=${onReveal}>🔒</span>
+				      role="button" tabindex="0" aria-label="Reveal attachment"
+				      @click=${onReveal} @keydown=${onRevealKey}>🔒</span>
 				<span class="vaultcrypt-chip-dots"
-				      @click=${onReveal}>••••••••</span>
+				      role="button" tabindex="0" aria-label="Reveal attachment"
+				      @click=${onReveal} @keydown=${onRevealKey}>••••••••</span>
 				${isText ? html`
 					<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
 					        @mousedown=${(evt: MouseEvent) => {
@@ -328,14 +342,19 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		render(html`
 			<span class="vaultcrypt-chip-file-row">
 				<span class="vaultcrypt-chip-icon" title="Mask attachment"
-				      style="cursor:pointer"
-				      @click=${(evt: MouseEvent) => {
+				      role="button" tabindex="0" aria-label="Mask attachment" style="cursor:pointer"
+				      @click=${(evt: Event) => {
 						evt.stopPropagation();
-						if (isOpen) {
-							revokePreviewUrl();
-							previewOpen.set(false);
-						}
+						if (isOpen) { revokePreviewUrl(); previewOpen.set(false); }
 						attachmentRevealed.set(false);
+					}}
+				      @keydown=${(evt: KeyboardEvent) => {
+						if (evt.key === 'Enter' || evt.key === ' ') {
+							evt.preventDefault();
+							evt.stopPropagation();
+							if (isOpen) { revokePreviewUrl(); previewOpen.set(false); }
+							attachmentRevealed.set(false);
+						}
 					}}>📎</span>
 				<span class="vaultcrypt-chip-value">${filename}</span>
 				<button type="button" class="vaultcrypt-chip-btn" title="Save attachment"

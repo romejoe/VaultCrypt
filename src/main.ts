@@ -124,7 +124,6 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 		this.sessionService.onLock(id => {
 			this.syncProfileLockState(id, true);
-			revokeAttachmentVideoCache(id);
 			new Notice(`Profile "${id}" is locked`);
 			this.refreshAllEditorChips();
 
@@ -137,6 +136,9 @@ export default class VaultCryptPlugin extends Plugin {
 					}
 				}));
 			});
+
+			// Revoke after chips are destroyed/refreshed so no widget can re-add to cache.
+			revokeAttachmentVideoCache(id);
 		});
 
 		// Ribbon icon → unlock modal (prefers keyring when available)
