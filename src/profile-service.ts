@@ -28,9 +28,9 @@ export class ProfileService {
 			await this.adapter.mkdir(dirPath);
 		} catch (e) {
 			console.error('Error creating VaultCrypt directory:', e);
-			if (e instanceof Error || typeof e === 'string') {
-				new Notice(`Error creating VaultCrypt directory: ${e}`);
-			}
+			const msg = e instanceof Error ? e.message : String(e);
+			new Notice(`Error creating VaultCrypt directory: ${msg}`);
+			throw e;
 		}
 	}
 
@@ -103,6 +103,10 @@ export class ProfileService {
 		// Helper to remap a path prefix
 		const remap = (p: string) =>
 			p.startsWith(`${oldDir}/`) ? `${newDir}/${p.substring(oldDir.length + 1)}` : p;
+
+		// Keep the KdbxService's cached current-path in sync so any pending
+		// saveDatabase() call targets the new location, not the old one.
+		this.kdbxService.remapPathPrefix(oldDir, newDir);
 
 		// Update persisted settings
 		this.patchSettings(s => {
