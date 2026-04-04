@@ -75,11 +75,16 @@ export class MoveVaultDirModal extends Modal {
 	private moveFiles = true;
 	private confirmBtn!: ButtonComponent;
 
+	/** Strip trailing slashes and surrounding whitespace for consistent comparisons. */
+	private normalizeDir(path: string): string {
+		return path.trim().replace(/\/+$/, '');
+	}
+
 	constructor(app: App, plugin: VaultCryptPlugin, onDone: () => void) {
 		super(app);
 		this.plugin = plugin;
 		this.onDone = onDone;
-		this.newPath = plugin.settings.general.vaultCryptDir;
+		this.newPath = this.normalizeDir(plugin.settings.general.vaultCryptDir);
 	}
 
 	onOpen() {
@@ -95,7 +100,7 @@ export class MoveVaultDirModal extends Modal {
 			.addText(text => text
 				.setValue(this.newPath)
 				.onChange(value => {
-					this.newPath = value.trim();
+					this.newPath = this.normalizeDir(value);
 					this.updateConfirmState();
 				}));
 
@@ -156,7 +161,8 @@ export class MoveVaultDirModal extends Modal {
 	}
 
 	private updateConfirmState() {
-		const isUnchanged = this.newPath === this.plugin.settings.general.vaultCryptDir;
+		const current = this.normalizeDir(this.plugin.settings.general.vaultCryptDir);
+		const isUnchanged = this.newPath === current;
 		const isEmpty = this.newPath.length === 0;
 		this.confirmBtn?.setDisabled(isUnchanged || isEmpty);
 	}
