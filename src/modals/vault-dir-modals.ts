@@ -1,4 +1,4 @@
-import {App, ButtonComponent, Modal, Notice, Setting} from 'obsidian';
+import {App, ButtonComponent, Modal, Notice, Setting, TFolder} from 'obsidian';
 import VaultCryptPlugin from '../main';
 
 /**
@@ -132,8 +132,11 @@ export class MoveVaultDirModal extends Modal {
 								// Create the directory first; if this throws, settings are NOT patched
 								// and the catch block re-enables the button without committing a bad path.
 								// Check existence first — mkdir throws if the directory already exists.
-								const exists = await this.plugin.app.vault.adapter.exists(targetPath);
-								if (!exists) {
+								const existing = this.plugin.app.vault.getAbstractFileByPath(targetPath);
+								if (existing && !(existing instanceof TFolder)) {
+									throw new Error(`Target path "${targetPath}" exists and is not a folder.`);
+								}
+								if (!existing) {
 									await this.plugin.app.vault.adapter.mkdir(targetPath);
 								}
 								this.plugin.patchSettings(s => {
