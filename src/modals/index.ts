@@ -9,3 +9,4 @@ export {EditSecretModal} from './edit-secret-modal';
 export {DeleteSecretModal} from './delete-secret-modal';
 export {GeneratePasswordModal} from './generate-password-modal';
 export {SearchSecretsModal} from './search-secrets-modal';
+export {SyncWarningModal, MoveVaultDirModal} from './vault-dir-modals';

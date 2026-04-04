@@ -21,12 +21,11 @@ export class ProfileService {
 	) {
 	}
 
-	/** Creates the .vaultcrypt directory if it doesn't exist and writes the initial config file. */
+	/** Creates the .vaultcrypt directory if it doesn't exist. */
 	async ensureVaultCryptDir(): Promise<void> {
 		const dirPath = peek(this.settings).general.vaultCryptDir;
 		try {
 			await this.adapter.mkdir(dirPath);
-			await this.writeConfigFile();
 		} catch (e) {
 			console.error('Error creating VaultCrypt directory:', e);
 			if (e instanceof Error || typeof e === 'string') {
@@ -35,18 +34,44 @@ export class ProfileService {
 		}
 	}
 
-	/** Serialises the current settings to vaultcrypt.config.json. */
-	async writeConfigFile(): Promise<void> {
+	/**
+	 * Moves the vault directory to a new location, migrating all files and
+	 * updating profile paths and the vaultCryptDir setting.
+	 */
+	async moveVaultDir(newDir: string): Promise<void> {
 		const settings = peek(this.settings);
-		const dirPath = settings.general.vaultCryptDir;
-		const configPath = `${dirPath}/vaultcrypt.config.json`;
-		const configData = {
-			profiles: settings.profiles,
-			masterKeyringPath: settings.masterKeyringPath,
-			keyringEnabled: settings.keyringEnabled,
-			clipboardClearSeconds: settings.security.clipboardClearSeconds,
-		};
-		await this.adapter.write(configPath, JSON.stringify(configData, null, 2));
+		const oldDir = settings.general.vaultCryptDir;
+		if (oldDir === newDir) return;
+
+		try {
+			await this.adapter.mkdir(newDir);
+			const listing = await this.adapter.list(oldDir);
+			for (const filePath of listing.files) {
+				const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+				await this.adapter.rename(filePath, `${newDir}/${fileName}`);
+			}
+			try {
+				await this.adapter.rmdir(oldDir, false);
+			} catch {
+				// Non-fatal: old dir may not be empty if listing was incomplete
+			}
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			new Notice(`VaultCrypt: failed to move directory — ${msg}`);
+			throw e;
+		}
+
+		this.patchSettings(s => {
+			s.general.vaultCryptDir = newDir;
+			for (const profile of Object.values(s.profiles)) {
+				if (profile.path.startsWith(`${oldDir}/`)) {
+					profile.path = `${newDir}/${profile.path.substring(oldDir.length + 1)}`;
+				}
+			}
+			if (s.masterKeyringPath.startsWith(`${oldDir}/`)) {
+				s.masterKeyringPath = `${newDir}/${s.masterKeyringPath.substring(oldDir.length + 1)}`;
+			}
+		});
 	}
 
 	/** Creates a new KDBX database on disk and registers the profile in settings. */
@@ -65,7 +90,6 @@ export class ProfileService {
 				managedByKeyring: false,
 			};
 		});
-		await this.writeConfigFile();
 	}
 
 	/** Updates mutable profile settings (auto-lock timeout, default field). */
@@ -90,8 +114,6 @@ export class ProfileService {
 				runtimeProfile.autoLockMinutes = updates.autoLockMinutes;
 			}
 		});
-
-		await this.writeConfigFile();
 	}
 
 	/** Renames a profile key in settings and updates any runtime references. */
@@ -124,8 +146,6 @@ export class ProfileService {
 				state.currentProfile.name = newKey;
 			}
 		});
-
-		await this.writeConfigFile();
 	}
 
 	/**
@@ -162,7 +182,5 @@ export class ProfileService {
 				state.currentProfile = null;
 			}
 		});
-
-		await this.writeConfigFile();
 	}
 }
