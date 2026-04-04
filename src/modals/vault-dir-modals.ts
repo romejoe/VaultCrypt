@@ -128,7 +128,12 @@ export class MoveVaultDirModal extends Modal {
 									s.general.vaultCryptDir = this.newPath;
 								});
 							}
-						} catch {
+						} catch (e) {
+							if (!this.moveFiles) {
+								// moveVaultDir shows its own Notice; only surface mkdir errors here
+								const msg = e instanceof Error ? e.message : String(e);
+								new Notice(`VaultCrypt: failed to create directory — ${msg}`);
+							}
 							btn.setDisabled(false);
 							return;
 						}
