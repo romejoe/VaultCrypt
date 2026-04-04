@@ -124,6 +124,8 @@ export class MoveVaultDirModal extends Modal {
 								this.plugin.patchSettings(s => {
 									s.general.vaultCryptDir = this.newPath;
 								});
+								// Ensure the newly-configured directory actually exists on disk
+								await this.plugin.profileService.ensureVaultCryptDir();
 							}
 						} catch {
 							btn.setDisabled(false);

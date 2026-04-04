@@ -37,41 +37,101 @@ export class ProfileService {
 	/**
 	 * Moves the vault directory to a new location, migrating all files and
 	 * updating profile paths and the vaultCryptDir setting.
+	 *
+	 * Sub-directories are preserved, a full rollback is attempted on any
+	 * rename failure, and both persisted settings and in-memory runtime
+	 * state are updated atomically after a successful migration.
 	 */
 	async moveVaultDir(newDir: string): Promise<void> {
 		const settings = peek(this.settings);
 		const oldDir = settings.general.vaultCryptDir;
 		if (oldDir === newDir) return;
 
+		// Gather a recursive listing of everything under oldDir
+		const allFiles: string[] = [];
+		const allFolders: string[] = [];
+		try {
+			await this.collectListing(oldDir, allFiles, allFolders);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			new Notice(`VaultCrypt: failed to read directory — ${msg}`);
+			throw e;
+		}
+
+		// Create destination root and any sub-directories (in discovery order
+		// so parents are created before their children)
 		try {
 			await this.adapter.mkdir(newDir);
-			const listing = await this.adapter.list(oldDir);
-			for (const filePath of listing.files) {
-				const fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-				await this.adapter.rename(filePath, `${newDir}/${fileName}`);
-			}
-			try {
-				await this.adapter.rmdir(oldDir, false);
-			} catch {
-				// Non-fatal: old dir may not be empty if listing was incomplete
+			for (const folderPath of allFolders) {
+				const rel = folderPath.substring(oldDir.length + 1);
+				await this.adapter.mkdir(`${newDir}/${rel}`);
 			}
 		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			new Notice(`VaultCrypt: failed to create target directories — ${msg}`);
+			throw e;
+		}
+
+		// Move files; on any failure roll back already-moved files
+		const moved: Array<{ from: string; to: string }> = [];
+		try {
+			for (const filePath of allFiles) {
+				const rel = filePath.substring(oldDir.length + 1);
+				const target = `${newDir}/${rel}`;
+				await this.adapter.rename(filePath, target);
+				moved.push({ from: filePath, to: target });
+			}
+		} catch (e) {
+			for (const { from, to } of [...moved].reverse()) {
+				try {
+					await this.adapter.rename(to, from);
+				} catch {
+					console.warn(`VaultCrypt: rollback failed for ${to} → ${from}`);
+				}
+			}
 			const msg = e instanceof Error ? e.message : String(e);
 			new Notice(`VaultCrypt: failed to move directory — ${msg}`);
 			throw e;
 		}
 
+		// Remove old sub-directories deepest-first, then the root
+		for (const folderPath of [...allFolders].reverse()) {
+			try { await this.adapter.rmdir(folderPath, false); } catch { /* non-fatal */ }
+		}
+		try { await this.adapter.rmdir(oldDir, false); } catch { /* non-fatal */ }
+
+		// Helper to remap a path prefix
+		const remap = (p: string) =>
+			p.startsWith(`${oldDir}/`) ? `${newDir}/${p.substring(oldDir.length + 1)}` : p;
+
+		// Update persisted settings
 		this.patchSettings(s => {
 			s.general.vaultCryptDir = newDir;
 			for (const profile of Object.values(s.profiles)) {
-				if (profile.path.startsWith(`${oldDir}/`)) {
-					profile.path = `${newDir}/${profile.path.substring(oldDir.length + 1)}`;
-				}
+				profile.path = remap(profile.path);
 			}
-			if (s.masterKeyringPath.startsWith(`${oldDir}/`)) {
-				s.masterKeyringPath = `${newDir}/${s.masterKeyringPath.substring(oldDir.length + 1)}`;
+			s.masterKeyringPath = remap(s.masterKeyringPath);
+		});
+
+		// Keep in-memory runtime state in sync with the new paths
+		this.mutateState(state => {
+			for (const profile of state.profiles) {
+				profile.path = remap(profile.path);
+			}
+			if (state.currentProfile) {
+				state.currentProfile.path = remap(state.currentProfile.path);
 			}
 		});
+	}
+
+	/** Recursively collects all files and folders under a directory. */
+	private async collectListing(dir: string, files: string[], folders: string[]): Promise<void> {
+		const listing = await this.adapter.list(dir);
+		files.push(...listing.files);
+		for (const folder of listing.folders) {
+			folders.push(folder);
+			await this.collectListing(folder, files, folders);
+		}
 	}
 
 	/** Creates a new KDBX database on disk and registers the profile in settings. */
