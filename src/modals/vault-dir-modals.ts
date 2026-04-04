@@ -116,20 +116,27 @@ export class MoveVaultDirModal extends Modal {
 					.setCta()
 					.onClick(async () => {
 						btn.setDisabled(true);
+						// Snapshot mutable fields at click time to avoid async state drift
+						const targetPath = this.newPath;
+						const moveFiles = this.moveFiles;
 						try {
-							if (this.moveFiles) {
-								await this.plugin.profileService.moveVaultDir(this.newPath);
-								new Notice(`VaultCrypt: directory moved to "${this.newPath}".`);
+							if (moveFiles) {
+								await this.plugin.profileService.moveVaultDir(targetPath);
+								new Notice(`VaultCrypt: directory moved to "${targetPath}".`);
 							} else {
 								// Create the directory first; if this throws, settings are NOT patched
 								// and the catch block re-enables the button without committing a bad path.
-								await this.plugin.app.vault.adapter.mkdir(this.newPath);
+								// Check existence first — mkdir throws if the directory already exists.
+								const exists = await this.plugin.app.vault.adapter.exists(targetPath);
+								if (!exists) {
+									await this.plugin.app.vault.adapter.mkdir(targetPath);
+								}
 								this.plugin.patchSettings(s => {
-									s.general.vaultCryptDir = this.newPath;
+									s.general.vaultCryptDir = targetPath;
 								});
 							}
 						} catch (e) {
-							if (!this.moveFiles) {
+							if (!moveFiles) {
 								// moveVaultDir shows its own Notice; only surface mkdir errors here
 								const msg = e instanceof Error ? e.message : String(e);
 								new Notice(`VaultCrypt: failed to create directory — ${msg}`);
