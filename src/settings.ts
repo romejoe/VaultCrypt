@@ -5,6 +5,7 @@ import {
 	AddProfileModal, EditProfileModal, RenameProfileModal, DeleteProfileModal,
 	SetupKeyringModal, AddToKeyringModal, RemoveFromKeyringModal,
 	ChangeKeyringPasswordModal, DeleteKeyringModal,
+	MoveVaultDirModal,
 } from "./modals";
 
 export interface ProfileConfig {
@@ -31,6 +32,7 @@ export interface VaultCryptSettings {
 		autoUnmask: boolean;
 		saveOnBlur: boolean;
 		autoPreviewAttachments: boolean;
+		hasSeenSyncWarning: boolean;
 	};
 }
 
@@ -50,6 +52,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		autoUnmask: false,
 		saveOnBlur: true,
 		autoPreviewAttachments: false,
+		hasSeenSyncWarning: false,
 	}
 };
 
@@ -226,15 +229,10 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('VaultCrypt directory path')
-			.setDesc('Path to the .vaultcrypt directory where configuration and databases are stored')
-			.addText(text => text
-				.setPlaceholder('.vaultcrypt')
-				.setValue(this.plugin.settings.general.vaultCryptDir)
-				.onChange((value) => {
-					this.plugin.patchSettings(s => {
-						s.general.vaultCryptDir = value;
-					});
-				}));
+			.setDesc(`Current: ${this.plugin.settings.general.vaultCryptDir} — Folder where .kdbx databases are stored.`)
+			.addButton(btn => btn
+				.setButtonText('Change directory')
+				.onClick(() => new MoveVaultDirModal(this.app, this.plugin, () => this.display()).open()));
 
 		new Setting(containerEl)
 			.setName('Compact chips')

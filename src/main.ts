@@ -4,7 +4,7 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
 import {UnlockSessionService} from './unlock-session';
 import {KeyringService} from './keyring-service';
-import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal} from './modals';
+import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal, SyncWarningModal} from './modals';
 import {VaultCryptProfile, VaultCryptState} from './types';
 import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
 import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
@@ -116,6 +116,12 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Ensure the .vaultcrypt directory exists
 		await this.profileService.ensureVaultCryptDir();
+
+		// Warn once if the vault directory is hidden and Obsidian Sync won't include it
+		if (!this.settings.general.hasSeenSyncWarning &&
+			this.settings.general.vaultCryptDir.startsWith('.')) {
+			new SyncWarningModal(this.app, this).open();
+		}
 
 		// Wire session events → sync runtime state + update UI
 		this.sessionService.onUnlock(id => {
@@ -468,6 +474,11 @@ export default class VaultCryptPlugin extends Plugin {
 		const security = newSettings.security as VaultCryptSettings['security'] & { clipboardClearTimer?: number };
 		if (security.clipboardClearTimer !== undefined && security.clipboardClearSeconds === DEFAULT_SETTINGS.security.clipboardClearSeconds) {
 			security.clipboardClearSeconds = security.clipboardClearTimer;
+		}
+
+		// Migrate: ensure hasSeenSyncWarning exists
+		if (newSettings.general.hasSeenSyncWarning === undefined) {
+			newSettings.general.hasSeenSyncWarning = false;
 		}
 
 		this._settings$.set(newSettings);

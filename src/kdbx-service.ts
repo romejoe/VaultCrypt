@@ -112,6 +112,18 @@ export class KdbxService {
 		this.currentPath = null;
 	}
 
+	/**
+	 * Updates the cached current-path if it lives under oldPrefix, remapping it
+	 * to the equivalent path under newPrefix.  Call this after physically moving
+	 * the vault directory so that any subsequent saveDatabase() targets the
+	 * correct location.
+	 */
+	remapPathPrefix(oldPrefix: string, newPrefix: string): void {
+		if (this.currentPath?.startsWith(`${oldPrefix}/`)) {
+			this.currentPath = `${newPrefix}/${this.currentPath.substring(oldPrefix.length + 1)}`;
+		}
+	}
+
 	/** Changes the master password (credentials) of the currently open database. */
 	changePassword(newPassword: string): void {
 		if (!this.db) throw new Error('No database is open');
