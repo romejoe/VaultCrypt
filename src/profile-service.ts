@@ -1,4 +1,5 @@
-import {DataAdapter, Notice} from 'obsidian';
+import {App, Notice} from 'obsidian';
+import {getVaultFile, getVaultFolder} from './utils';
 import {ProfileConfig, VaultCryptSettings} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {VaultCryptState} from './types';
@@ -13,7 +14,7 @@ import {DeepReadonly} from "./utils";
 export class ProfileService {
 	constructor(
 		private settings: ReadSignal<DeepReadonly<VaultCryptSettings>>,
-		private adapter: DataAdapter,
+		private app: App,
 		private kdbxService: KdbxService,
 		private state: ReadSignal<DeepReadonly<VaultCryptState>>,
 		private patchSettings: (patcher: (settings: VaultCryptSettings) => void) => void,
@@ -25,12 +26,26 @@ export class ProfileService {
 	async ensureVaultCryptDir(): Promise<void> {
 		const dirPath = peek(this.settings).general.vaultCryptDir;
 		try {
-			await this.adapter.mkdir(dirPath);
+			await this.ensureFolderPath(dirPath);
 		} catch (e) {
 			console.error('Error creating VaultCrypt directory:', e);
 			const msg = e instanceof Error ? e.message : String(e);
 			new Notice(`Error creating VaultCrypt directory: ${msg}`);
 			throw e;
+		}
+	}
+
+	/**
+	 * Ensures every segment of a vault-relative path exists as a folder,
+	 * creating any missing intermediate directories. Equivalent to mkdir -p.
+	 */
+	private async ensureFolderPath(path: string): Promise<void> {
+		const segments = path.split('/').filter(Boolean);
+		for (let i = 1; i <= segments.length; i++) {
+			const partial = segments.slice(0, i).join('/');
+			if (!this.app.vault.getAbstractFileByPath(partial)) {
+				await this.app.vault.createFolder(partial);
+			}
 		}
 	}
 
@@ -46,6 +61,9 @@ export class ProfileService {
 		const settings = peek(this.settings);
 		const oldDir = settings.general.vaultCryptDir;
 		if (oldDir === newDir) return;
+		if (newDir.startsWith(`${oldDir}/`)) {
+			throw new Error(`Target path "${newDir}" cannot be inside the current vault directory "${oldDir}".`);
+		}
 
 		// Gather a recursive listing of everything under oldDir
 		const allFiles: string[] = [];
@@ -61,10 +79,10 @@ export class ProfileService {
 		// Create destination root and any sub-directories (in discovery order
 		// so parents are created before their children)
 		try {
-			await this.adapter.mkdir(newDir);
+			await this.ensureFolderPath(newDir);
 			for (const folderPath of allFolders) {
 				const rel = folderPath.substring(oldDir.length + 1);
-				await this.adapter.mkdir(`${newDir}/${rel}`);
+				await this.ensureFolderPath(`${newDir}/${rel}`);
 			}
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
@@ -78,13 +96,16 @@ export class ProfileService {
 			for (const filePath of allFiles) {
 				const rel = filePath.substring(oldDir.length + 1);
 				const target = `${newDir}/${rel}`;
-				await this.adapter.rename(filePath, target);
+				const file = getVaultFile(this.app, filePath);
+				if (!file) throw new Error(`File not found during move: ${filePath}`);
+				await this.app.vault.rename(file, target);
 				moved.push({ from: filePath, to: target });
 			}
 		} catch (e) {
 			for (const { from, to } of [...moved].reverse()) {
 				try {
-					await this.adapter.rename(to, from);
+					const movedFile = getVaultFile(this.app, to);
+					if (movedFile) await this.app.vault.rename(movedFile, from);
 				} catch {
 					console.warn(`VaultCrypt: rollback failed for ${to} → ${from}`);
 				}
@@ -96,9 +117,11 @@ export class ProfileService {
 
 		// Remove old sub-directories deepest-first, then the root
 		for (const folderPath of [...allFolders].reverse()) {
-			try { await this.adapter.rmdir(folderPath, false); } catch { /* non-fatal */ }
+			const folder = getVaultFolder(this.app, folderPath);
+			if (folder) try { await this.app.fileManager.trashFile(folder); } catch { /* non-fatal */ }
 		}
-		try { await this.adapter.rmdir(oldDir, false); } catch { /* non-fatal */ }
+		const oldFolder = getVaultFolder(this.app, oldDir);
+		if (oldFolder) try { await this.app.fileManager.trashFile(oldFolder); } catch { /* non-fatal */ }
 
 		// Helper to remap a path prefix
 		const remap = (p: string) =>
@@ -130,7 +153,7 @@ export class ProfileService {
 
 	/** Recursively collects all files and folders under a directory. */
 	private async collectListing(dir: string, files: string[], folders: string[]): Promise<void> {
-		const listing = await this.adapter.list(dir);
+		const listing = await this.app.vault.adapter.list(dir);
 		files.push(...listing.files);
 		for (const folder of listing.folders) {
 			folders.push(folder);
@@ -233,7 +256,8 @@ export class ProfileService {
 
 		if (deleteFile) {
 			try {
-				await this.adapter.remove(config.path);
+				const file = getVaultFile(this.app, config.path);
+				if (file) await this.app.fileManager.trashFile(file);
 			} catch (e) {
 				// File may not exist — log but don't abort
 				console.warn(`VaultCrypt: could not delete file ${config.path}:`, e);

@@ -94,13 +94,13 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 		// KdbxService must be instantiated first — its constructor registers the
 		// Argon2 implementation globally with kdbxweb (needed by UnlockSessionService).
-		this.kdbxService = new KdbxService(this.app.vault.adapter);
+		this.kdbxService = new KdbxService(this.app);
 		this.secretStorageService = new SecretStorageService(this.app);
-		this.sessionService = new UnlockSessionService(this.app.vault.adapter);
-		this.keyringService = new KeyringService(this.app.vault.adapter);
+		this.sessionService = new UnlockSessionService(this.app);
+		this.keyringService = new KeyringService(this.app);
 		this.profileService = new ProfileService(
 			this.settings$,
-			this.app.vault.adapter,
+			this.app,
 			this.kdbxService,
 			this.vaultCryptState$,
 			(patcher) => {

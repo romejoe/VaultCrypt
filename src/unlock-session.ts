@@ -1,4 +1,5 @@
-import {DataAdapter} from 'obsidian';
+import {App} from 'obsidian';
+import {getVaultFile} from './utils';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 
@@ -47,7 +48,7 @@ export class UnlockSessionService {
 	private lockCallbacks: LockCallback[] = [];
 	private unlockCallbacks: UnlockCallback[] = [];
 
-	constructor(private adapter: DataAdapter) {
+	constructor(private app: App) {
 	}
 
 	/** Opens a KDBX database and stores it in the session. Throws on wrong password. */
@@ -56,7 +57,9 @@ export class UnlockSessionService {
 		if (this.openDbs.has(profileId)) {
 			this.lockProfile(profileId);
 		}
-		const buffer = await this.adapter.readBinary(config.path);
+		const file = getVaultFile(this.app, config.path);
+		if (!file) throw new Error(`KDBX file not found: ${config.path}`);
+		const buffer = await this.app.vault.readBinary(file);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
@@ -72,7 +75,9 @@ export class UnlockSessionService {
 	 * Throws on I/O errors or a corrupted database.
 	 */
 	async checkProfilePassword(config: ProfileConfig, password: string): Promise<boolean> {
-		const buffer = await this.adapter.readBinary(config.path);
+		const file = getVaultFile(this.app, config.path);
+		if (!file) throw new Error(`KDBX file not found: ${config.path}`);
+		const buffer = await this.app.vault.readBinary(file);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
@@ -172,7 +177,7 @@ export class UnlockSessionService {
 		entry.times.update();
 
 		const buffer = await db.save();
-		await this.adapter.writeBinary(kdbxFilePath, buffer);
+		await this.saveKdbx(kdbxFilePath, buffer);
 	}
 
 	/**
@@ -242,7 +247,7 @@ export class UnlockSessionService {
 
 		try {
 			const buffer = await db.save();
-			await this.adapter.writeBinary(kdbxFilePath, buffer);
+			await this.saveKdbx(kdbxFilePath, buffer);
 		} catch (err) {
 			// Restore the entry to its pre-edit state so the in-memory session
 			// does not serve unsaved changes.
@@ -273,7 +278,7 @@ export class UnlockSessionService {
 
 		try {
 			const buffer = await db.save();
-			await this.adapter.writeBinary(kdbxFilePath, buffer);
+			await this.saveKdbx(kdbxFilePath, buffer);
 		} catch (err) {
 			// A delete cannot be trivially rolled back in kdbxweb, so lock the
 			// profile to force a clean reload from disk on next unlock.
@@ -363,7 +368,7 @@ export class UnlockSessionService {
 
 		try {
 			const buffer = await db.save();
-			await this.adapter.writeBinary(kdbxFilePath, buffer);
+			await this.saveKdbx(kdbxFilePath, buffer);
 		} catch (err) {
 			// Restore entry to pre-set state and reclaim the pool entry.
 			if (oldBinary !== undefined) {
@@ -401,7 +406,7 @@ export class UnlockSessionService {
 
 		try {
 			const buffer = await db.save();
-			await this.adapter.writeBinary(kdbxFilePath, buffer);
+			await this.saveKdbx(kdbxFilePath, buffer);
 		} catch (err) {
 			// Cannot trivially roll back; lock to force a clean reload from disk.
 			this.lockProfile(profileId);
@@ -449,7 +454,7 @@ export class UnlockSessionService {
 		entry.times.update();
 
 		const buffer = await db.save();
-		await this.adapter.writeBinary(kdbxFilePath, buffer);
+		await this.saveKdbx(kdbxFilePath, buffer);
 	}
 
 	/** Register a callback to be called when any profile is locked. */
@@ -460,6 +465,15 @@ export class UnlockSessionService {
 	/** Register a callback to be called when any profile is unlocked. */
 	onUnlock(cb: UnlockCallback): void {
 		this.unlockCallbacks.push(cb);
+	}
+
+	private async saveKdbx(path: string, buffer: ArrayBuffer): Promise<void> {
+		const existing = getVaultFile(this.app, path);
+		if (existing) {
+			await this.app.vault.modifyBinary(existing, buffer);
+		} else {
+			await this.app.vault.createBinary(path, buffer);
+		}
 	}
 
 	private resolveEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry | null {

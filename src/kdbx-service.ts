@@ -1,4 +1,5 @@
-import { DataAdapter } from 'obsidian';
+import { App } from 'obsidian';
+import { getVaultFile } from './utils';
 import * as kdbxweb from 'kdbxweb';
 import { Int64 } from "kdbxweb";
 import { argon2d, argon2id } from '@noble/hashes/argon2.js';
@@ -34,7 +35,7 @@ export class KdbxService {
 	private db: kdbxweb.Kdbx | null = null;
 	private currentPath: string | null = null;
 
-	constructor(private adapter: DataAdapter) {
+	constructor(private app: App) {
 		kdbxweb.CryptoEngine.setArgon2Impl((password, salt, memory, iterations, length, parallelism, type, version) => {
 			const argon2 = type === 0 ? argon2d : argon2id;
 
@@ -93,7 +94,9 @@ export class KdbxService {
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
-		const buffer = await this.adapter.readBinary(path);
+		const file = getVaultFile(this.app, path);
+		if (!file) throw new Error(`KDBX file not found: ${path}`);
+		const buffer = await this.app.vault.readBinary(file);
 		this.db = await kdbxweb.Kdbx.load(buffer, credentials);
 		this.currentPath = path;
 	}
@@ -103,7 +106,12 @@ export class KdbxService {
 		const savePath = path ?? this.currentPath;
 		if (!savePath) throw new Error('No path specified and no current path');
 		const buffer = await this.db.save();
-		await this.adapter.writeBinary(savePath, buffer);
+		const existing = getVaultFile(this.app, savePath);
+		if (existing) {
+			await this.app.vault.modifyBinary(existing, buffer);
+		} else {
+			await this.app.vault.createBinary(savePath, buffer);
+		}
 		this.currentPath = savePath;
 	}
 

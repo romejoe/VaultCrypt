@@ -119,19 +119,9 @@ If your plugin does not need CSS, delete this file.
 	color: var(--text-accent);
 }
 
-.vaultcrypt-chip-icon-unlocked{
-	cursor: pointer;
-}
-
-.vaultcrypt-chip-icon-locked{
-	cursor: pointer;
-}
-
-.vaultcrypt-chip-icon-unlocked{
-	cursor: pointer;
-}
-
-.vaultcrypt-chip-dots{
+.vaultcrypt-chip-icon-unlocked,
+.vaultcrypt-chip-icon-locked,
+.vaultcrypt-chip-dots {
 	cursor: pointer;
 }
 

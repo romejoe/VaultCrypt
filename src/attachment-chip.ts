@@ -1,4 +1,4 @@
-import {Menu, Notice, Platform} from 'obsidian';
+import {Menu, Notice, Platform, TFile} from 'obsidian';
 import {UnlockModal} from './modals';
 import {ParsedVcToken} from './inline-parser';
 import type VaultCryptPlugin from './main';
@@ -480,19 +480,27 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 		// Fallback: save into the vault's .vaultcrypt/attachments/ directory.
 		try {
+			const vault = plugin.app.vault;
 			const vcDir = plugin.settings$().general.vaultCryptDir;
 			const safeProfileId = sanitizeVaultSegment(profileId);
 			const safeEntry = token.entryPath.split('/').filter(Boolean).map(sanitizeVaultSegment).join('/');
 			const safeFilename = sanitizeVaultSegment(filename);
 			const dir = `${vcDir}/attachments/${safeProfileId}/${safeEntry}`;
 			const savePath = `${dir}/${safeFilename}`;
-			const adapter = plugin.app.vault.adapter;
-			try {
-				await adapter.mkdir(dir);
-			} catch (e) {
-				if (!(e instanceof Error && e.message.includes('EEXIST'))) throw e;
+			// vault.createFolder() is not recursive — create each path segment in order
+			const segments = dir.split('/');
+			for (let i = 1; i <= segments.length; i++) {
+				const partial = segments.slice(0, i).join('/');
+				if (!vault.getAbstractFileByPath(partial)) {
+					await vault.createFolder(partial);
+				}
 			}
-			await adapter.writeBinary(savePath, data);
+			const existingFile = vault.getAbstractFileByPath(savePath);
+			if (existingFile instanceof TFile) {
+				await vault.modifyBinary(existingFile, data);
+			} else {
+				await vault.createBinary(savePath, data);
+			}
 			new Notice(`Saved to vault: ${savePath}`);
 		} catch (err) {
 			new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
