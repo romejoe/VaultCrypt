@@ -2,7 +2,6 @@ import tseslint from 'typescript-eslint';
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
 import { globalIgnores } from "eslint/config";
-import { DEFAULT_BRANDS } from "eslint-plugin-obsidianmd/dist/lib/rules/ui/brands.js";
 
 export default tseslint.config(
 	{
@@ -35,7 +34,7 @@ export default tseslint.config(
 			// Extend the default brand list with VaultCrypt-specific proper nouns
 			'obsidianmd/ui/sentence-case': ['error', {
 				enforceCamelCaseLower: true,
-				brands: [...DEFAULT_BRANDS, 'VaultCrypt', 'KeePassXC', 'KDBX'],
+				brands: ['VaultCrypt', 'KeePassXC', 'KDBX', 'Obsidian', 'Obsidian Sync'],
 			}],
 		}
 	},
