@@ -15,7 +15,7 @@ const MAX_PREVIEW_BYTES = 10 * 1024; // 10 KB
 function sanitizeVaultSegment(value: string): string {
 	if (!value) return '_';
 	return value
-		// eslint-disable-next-line no-control-regex
+		// eslint-disable-next-line no-control-regex -- control characters (0x00–0x1F) must be stripped from filesystem paths
 		.replace(/[\\/:*?"<>|\x00-\x1F]/g, '_')
 		.replace(/^\.+$/, '_');
 }
@@ -434,12 +434,13 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 		// Desktop: try Electron save dialog.
 		if (Platform.isDesktop) {
-			let dialog: {
-				showSaveDialog(o: { defaultPath: string }): Promise<{ canceled: boolean; filePath?: string }>
-			} | undefined;
+			type ElectronDialog = { showSaveDialog(o: { defaultPath: string }): Promise<{ canceled: boolean; filePath?: string }> };
+			type RemoteModule = { dialog?: ElectronDialog };
+			type FsPromises = { writeFile(path: string, data: Uint8Array): Promise<void> };
+			type FsModule = { promises?: FsPromises };
+			let dialog: ElectronDialog | undefined;
 			try {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
-				dialog = (window as any).require?.('@electron/remote')?.dialog;
+				dialog = (window as unknown as { require?: (id: string) => RemoteModule }).require?.('@electron/remote')?.dialog;
 			} catch {
 				dialog = undefined;
 			}
@@ -453,10 +454,9 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 				}
 				if (result.canceled || !result.filePath) return;
 				try {
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call
-					const fs = (window as any).require?.('fs')?.promises;
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,no-undef
-					await fs.writeFile(result.filePath, Buffer.from(data));
+					const fs = (window as unknown as { require?: (id: string) => FsModule }).require?.('fs')?.promises;
+					// eslint-disable-next-line no-undef -- Buffer is a Node.js global available in Electron
+					await fs?.writeFile(result.filePath, Buffer.from(data));
 					new Notice(`Saved to ${result.filePath}`);
 				} catch (err) {
 					new Notice(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);

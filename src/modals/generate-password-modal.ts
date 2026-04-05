@@ -57,22 +57,21 @@ export class GeneratePasswordModal extends Modal {
 				}));
 
 		new Setting(contentEl)
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			.setName('Uppercase letters (A–Z)')
+			.setName('Uppercase letters')
 			.addToggle(t => t.setValue(this.opts.upper).onChange(v => {
 				this.opts.upper = v;
 				this.refreshPreview();
 			}));
 
 		new Setting(contentEl)
-			.setName('Lowercase letters (a–z)')
+			.setName('Lowercase letters')
 			.addToggle(t => t.setValue(this.opts.lower).onChange(v => {
 				this.opts.lower = v;
 				this.refreshPreview();
 			}));
 
 		new Setting(contentEl)
-			.setName('Digits (0–9)')
+			.setName('Digits')
 			.addToggle(t => t.setValue(this.opts.digits).onChange(v => {
 				this.opts.digits = v;
 				this.refreshPreview();

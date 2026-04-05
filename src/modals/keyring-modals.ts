@@ -281,8 +281,7 @@ export class AddToKeyringModal extends Modal {
 		this.titleEl.setText("Add profile to keyring");
 
 		contentEl.createEl("p", {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			text: "⚠ Security tradeoff: adding a profile to the keyring means a compromised keyring or master password exposes this profile password alongside all others.",
+			text: "⚠ security tradeoff: adding a profile to the keyring means a compromised keyring or master password exposes this profile password alongside all others.",
 			cls: "mod-warning",
 		});
 

@@ -137,29 +137,3 @@ function findChipAtPos(view: EditorView, pos: number): HTMLElement | null {
 	}
 }
 
-/**
- * Determines the appropriate clipboard text for a raw `{{vc:...}}` token
- * that was found in a text node (e.g. when cursor is inside the token in
- * CM6 and the decoration is suppressed).
- */
-function resolveTokenCopyText(
-	plugin: VaultCryptPlugin,
-	profileId: string,
-	_entryPath: string,
-	_fieldName: string | null,
-): string {
-	const pid = profileId.toLowerCase();
-	const config = plugin.settings.profiles[pid];
-	if (!config) return '[unknown]';
-
-	const isLocked = plugin.vaultCryptState$().profiles.find(
-		p => p.id === pid,
-	)?.isLocked ?? true;
-
-	if (isLocked) return '[locked]';
-
-	// Profile is unlocked but the raw token is visible (cursor inside it),
-	// so the chip is not rendered and there is no revealed/masked state.
-	// Default to [encrypted] to avoid leaking plaintext without explicit reveal.
-	return '[encrypted]';
-}
