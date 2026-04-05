@@ -38,12 +38,9 @@ export function buildCopyTextFromSelection(
 			const re = new RegExp(VC_TOKEN_REGEX.source, 'g');
 			if (!re.test(text)) return text;
 
-			// Replace any leaked raw {{vc:...}} tokens
+			// Raw {{vc:...}} tokens in text nodes — copy them literally
 			containsChip = true;
-			const re2 = new RegExp(VC_TOKEN_REGEX.source, 'g');
-			return text.replace(re2, (_match, profileId: string, entryPath: string, fieldName?: string) => {
-				return resolveTokenCopyText(plugin, profileId, entryPath, fieldName ?? null);
-			});
+			return text;
 		}
 
 		// Element node
@@ -108,8 +105,8 @@ export function buildCopyTextFromEditorSelection(
 			if (chipEl) {
 				result += chipEl.dataset.vcCopyText ?? '[encrypted]';
 			} else {
-				// Token is visible as raw text (e.g. cursor inside it) — use fallback
-				result += resolveTokenCopyText(plugin, token.profileId, token.entryPath, token.fieldName);
+				// Token is visible as raw text (e.g. cursor inside it) — copy it literally
+				result += token.raw;
 			}
 
 			cursor = token.to;
