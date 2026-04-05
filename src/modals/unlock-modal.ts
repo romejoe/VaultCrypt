@@ -12,8 +12,11 @@ export class UnlockModal extends Modal {
 	private passwordInputEl!: HTMLInputElement;
 	private rememberToggle: ToggleComponent | null = null;
 	private errorEl!: HTMLParagraphElement;
+	private progressEl!: HTMLParagraphElement;
+	private progressTimer: number | null = null;
 	private isSubmitting = false;
 	private submitBtn!: ButtonComponent;
+	private cancelBtn!: ButtonComponent;
 	private onDone: ((profileId: string) => void) | undefined;
 
 	constructor(
@@ -117,13 +120,18 @@ export class UnlockModal extends Modal {
 		this.errorEl.addClass("vaultcrypt-hidden");
 
 		new Setting(contentEl)
-			.addButton(btn => btn.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton(btn => {
+				this.cancelBtn = btn;
+				btn.setButtonText("Cancel").onClick(() => this.close());
+			})
 			.addButton(btn => {
 				this.submitBtn = btn;
 				btn.setButtonText("Unlock")
 					.setCta()
 					.onClick(() => this.submit());
 			});
+
+		this.progressEl = contentEl.createEl("p", {cls: "vaultcrypt-unlock-progress vaultcrypt-hidden"});
 
 		this.updateKeyringSection();
 		this.refreshSavedPasswordState();
@@ -203,6 +211,15 @@ export class UnlockModal extends Modal {
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
+		this.cancelBtn.setDisabled(true);
+		this.submitBtn.setButtonText("Unlocking...");
+		const startTime = Date.now();
+		this.progressEl.setText("Opening database...");
+		this.progressEl.removeClass("vaultcrypt-hidden");
+		this.progressTimer = window.setInterval(() => {
+			const elapsed = Math.round((Date.now() - startTime) / 1000);
+			this.progressEl.setText(`Opening database... (${elapsed}s)`);
+		}, 1000);
 		try {
 			if (useKeyring) {
 				let passwords: Map<string, string>;
@@ -249,7 +266,14 @@ export class UnlockModal extends Modal {
 			this.showError("Incorrect password or corrupted database.");
 		} finally {
 			this.isSubmitting = false;
+			if (this.progressTimer !== null) {
+				window.clearInterval(this.progressTimer);
+				this.progressTimer = null;
+			}
+			this.progressEl.addClass("vaultcrypt-hidden");
+			this.submitBtn.setButtonText("Unlock");
 			this.submitBtn.setDisabled(false);
+			this.cancelBtn.setDisabled(false);
 		}
 	}
 
