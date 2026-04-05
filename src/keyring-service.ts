@@ -1,5 +1,6 @@
-import {DataAdapter} from 'obsidian';
+import {App} from 'obsidian';
 import {KdbxService} from './kdbx-service';
+import {getVaultFile} from './utils';
 
 /** Hardened KDF parameters for the keyring (protects all profile passwords). */
 const KEYRING_KDF = {iterations: 4, memory: 131072, parallelism: 4};
@@ -12,16 +13,16 @@ const KEYRING_KDF = {iterations: 4, memory: 131072, parallelism: 4};
  * performs the action, then closes it immediately.
  */
 export class KeyringService {
-	constructor(private adapter: DataAdapter) {}
+	constructor(private app: App) {}
 
 	/** Checks whether the keyring file exists on disk. */
 	async keyringExists(path: string): Promise<boolean> {
-		return this.adapter.exists(path);
+		return this.app.vault.getAbstractFileByPath(path) !== null;
 	}
 
 	/** Creates a new KDBX 4.x keyring with hardened KDF parameters. */
 	async createKeyring(path: string, masterPassword: string): Promise<void> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.createDatabase(path, masterPassword, 4, KEYRING_KDF);
 		svc.closeDatabase();
 	}
@@ -35,7 +36,7 @@ export class KeyringService {
 		masterPassword: string,
 		profileIds: string[],
 	): Promise<Map<string, string>> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
 			const result = new Map<string, string>();
@@ -58,7 +59,7 @@ export class KeyringService {
 		profileId: string,
 		profilePassword: string,
 	): Promise<void> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
 			await svc.setEntry(profileId, {Password: profilePassword});
@@ -74,7 +75,7 @@ export class KeyringService {
 		masterPassword: string,
 		profileId: string,
 	): Promise<void> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
 			svc.deleteEntry(profileId);
@@ -91,7 +92,7 @@ export class KeyringService {
 		oldId: string,
 		newId: string,
 	): Promise<void> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
 			const entry = svc.getEntry(oldId);
@@ -112,7 +113,7 @@ export class KeyringService {
 		currentPassword: string,
 		newPassword: string,
 	): Promise<void> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, currentPassword);
 		try {
 			svc.changePassword(newPassword);
@@ -124,11 +125,13 @@ export class KeyringService {
 
 	/** Deletes the keyring file from disk. */
 	async deleteKeyring(path: string): Promise<void> {
+		const file = getVaultFile(this.app, path);
+		if (!file) return; // already gone
 		try {
-			await this.adapter.remove(path);
+			await this.app.fileManager.trashFile(file);
 		} catch (e) {
-			// Only swallow "file already gone" — rethrow real I/O failures
-			if (await this.adapter.exists(path)) {
+			// Re-check: only swallow if the file is actually gone
+			if (this.app.vault.getAbstractFileByPath(path)) {
 				throw e;
 			}
 		}
@@ -139,7 +142,7 @@ export class KeyringService {
 		path: string,
 		masterPassword: string,
 	): Promise<string[]> {
-		const svc = new KdbxService(this.adapter);
+		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
 			const entries = svc.listEntries();
