@@ -34,6 +34,7 @@ const context = await esbuild.context({
 		...builtinModules.filter(m => m !== 'crypto')],
 	alias: {
 		'crypto': './src/crypto-shim.ts',
+		'node:crypto': './src/crypto-shim.ts',
 	},
 	format: "cjs",
 	target: "es2018",

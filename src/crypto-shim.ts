@@ -4,6 +4,9 @@
 // fallbacks that exist only to satisfy the static import at module load time.
 
 export function randomBytes(size: number): Uint8Array {
+    if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+        throw new Error('Web Crypto API (globalThis.crypto.getRandomValues) is not available in this environment');
+    }
     const buf = new Uint8Array(size);
     globalThis.crypto.getRandomValues(buf);
     return buf;
