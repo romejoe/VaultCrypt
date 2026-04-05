@@ -25,6 +25,17 @@ export default tseslint.config(
 	{
 		rules: {
 			'semi': 'error',
+			'require-await': 'error'
+		}
+	},
+	{
+		plugins: { obsidianmd },
+		rules: {
+			// Extend the default brand list with VaultCrypt-specific proper nouns
+			'obsidianmd/ui/sentence-case': ['error', {
+				enforceCamelCaseLower: true,
+				brands: ['VaultCrypt', 'KeePassXC', 'KDBX', 'Obsidian', 'Obsidian Sync'],
+			}],
 		}
 	},
 	globalIgnores([

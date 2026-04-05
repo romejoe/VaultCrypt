@@ -147,7 +147,7 @@ export class KdbxService {
 		return this.toEntryRecord(entryPath, entry);
 	}
 
-	async setEntry(entryPath: string, fields: EntryFields): Promise<void> {
+	setEntry(entryPath: string, fields: EntryFields): void {
 		if (!this.db) throw new Error('No database is open');
 		const segments = entryPath.split('/');
 		const title = segments[segments.length - 1] ?? entryPath;

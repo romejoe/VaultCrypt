@@ -1,4 +1,4 @@
-import {Editor, MarkdownView, Menu, Notice, Plugin, TFile} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Platform, Plugin, TFile} from 'obsidian';
 import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
@@ -42,8 +42,12 @@ interface ElectronClipboard {
 
 function getElectronClipboard(): ElectronClipboard | null {
 	try {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-member-access
-		return (window as any).require?.('electron')?.clipboard ?? null;
+		if(!Platform.isDesktop){
+			return null;
+		}
+		type ElectronModule = { clipboard?: ElectronClipboard };
+		const mod = (window as unknown as { require?: (id: string) => ElectronModule }).require?.('electron');
+		return mod?.clipboard ?? null;
 	} catch {
 		return null;
 	}
@@ -148,7 +152,6 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 
 		// Ribbon icon → unlock modal (prefers keyring when available)
-		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		this.addRibbonIcon('lock', 'VaultCrypt', () => {
 			if (this.shouldUseKeyringUnlock()) {
 				new KeyringUnlockModal(this.app, this, () => {
@@ -309,8 +312,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor) => {
 				menu.addItem(item => item
-					// eslint-disable-next-line obsidianmd/ui/sentence-case
-					.setTitle('VaultCrypt: Insert secret here')
+					.setTitle('VaultCrypt: insert secret here')
 					.setIcon('key')
 					.onClick(() => new InsertSecretModal(this.app, this, editor).open()));
 			})
@@ -423,7 +425,6 @@ export default class VaultCryptPlugin extends Plugin {
 					return;
 				}
 				if (profiles.length === 0) {
-					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					this.statusBarItem.setText('🔒 VaultCrypt');
 					return;
 				}
@@ -506,12 +507,12 @@ export default class VaultCryptPlugin extends Plugin {
 		this.initRuntimeState();
 	}
 
-	async editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): Promise<void> {
-		await this.profileService.editProfile(name, updates);
+	editProfile(name: string, updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>): void {
+		this.profileService.editProfile(name, updates);
 	}
 
-	async renameProfile(oldName: string, newName: string): Promise<void> {
-		await this.profileService.renameProfile(oldName, newName);
+	renameProfile(oldName: string, newName: string): void {
+		this.profileService.renameProfile(oldName, newName);
 		this.initRuntimeState();
 	}
 

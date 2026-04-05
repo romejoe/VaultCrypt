@@ -137,7 +137,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 
 		if (Platform.isDesktop) {
 			menu.addItem(item => item
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setTitle('Open in KeePassXC')
 				.setIcon('external-link')
 				.onClick(async () => {
@@ -147,12 +146,12 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 						return;
 					}
 					try {
-						// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-explicit-any,@typescript-eslint/no-unsafe-call
-						const shell = (window as any).require?.('electron')?.shell;
+						type ElectronShell = { openPath: (path: string) => Promise<string> };
+						type ElectronModule = { shell?: ElectronShell };
+						const shell = (window as unknown as { require?: (id: string) => ElectronModule }).require?.('electron')?.shell;
 						const adapter = plugin.app.vault.adapter as { getFullPath?: (path: string) => string };
 						if (shell && adapter.getFullPath) {
-							// eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
-							const errorMsg: string = await shell.openPath(adapter.getFullPath(config.path));
+							const errorMsg = await shell.openPath(adapter.getFullPath(config.path));
 							if (errorMsg) {
 								new Notice(`Failed to open file: ${errorMsg}`);
 							}

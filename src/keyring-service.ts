@@ -16,7 +16,7 @@ export class KeyringService {
 	constructor(private app: App) {}
 
 	/** Checks whether the keyring file exists on disk. */
-	async keyringExists(path: string): Promise<boolean> {
+	keyringExists(path: string): boolean {
 		return this.app.vault.getAbstractFileByPath(path) instanceof TFile;
 	}
 
@@ -62,7 +62,7 @@ export class KeyringService {
 		const svc = new KdbxService(this.app);
 		await svc.openDatabase(path, masterPassword);
 		try {
-			await svc.setEntry(profileId, {Password: profilePassword});
+			svc.setEntry(profileId, {Password: profilePassword});
 			await svc.saveDatabase();
 		} finally {
 			svc.closeDatabase();
@@ -99,7 +99,7 @@ export class KeyringService {
 			if (!entry?.fields.Password) {
 				throw new Error(`No keyring entry found for profile "${oldId}"`);
 			}
-			await svc.setEntry(newId, {Password: entry.fields.Password});
+			svc.setEntry(newId, {Password: entry.fields.Password});
 			svc.deleteEntry(oldId);
 			await svc.saveDatabase();
 		} finally {

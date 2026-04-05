@@ -188,8 +188,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Clipboard clear timer')
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			.setDesc('How long after copying before the clipboard is cleared. Set to Disabled to turn off.')
+			.setDesc('How long after copying before the clipboard is cleared. Set to disabled to turn off.')
 			.addDropdown(drop => {
 				const allowed = new Set([0, 15, 30, 60, 120]);
 				const current = this.plugin.settings.security.clipboardClearSeconds;
@@ -212,8 +211,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Auto-unlock on file open')
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			.setDesc('When opening a note, automatically unlock profiles using saved passwords. Requires "Remember password" to be enabled when unlocking.')
+			.setDesc('When opening a note, automatically unlock profiles using saved passwords. Requires "remember password" to be enabled when unlocking.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.security.autoUnlock)
 				.onChange((value) => {
@@ -222,12 +220,9 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 					});
 				}));
 
-		// General section
-		// eslint-disable-next-line obsidianmd/settings-tab/no-problematic-settings-headings
-		new Setting(containerEl).setName("General").setHeading();
+		new Setting(containerEl).setName("Vault").setHeading();
 
 		new Setting(containerEl)
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('VaultCrypt directory path')
 			.setDesc(`Current: ${this.plugin.settings.general.vaultCryptDir} — Folder where .kdbx databases are stored.`)
 			.addButton(btn => btn

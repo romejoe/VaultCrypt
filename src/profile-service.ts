@@ -180,10 +180,10 @@ export class ProfileService {
 	}
 
 	/** Updates mutable profile settings (auto-lock timeout, default field). */
-	async editProfile(
+	editProfile(
 		name: string,
 		updates: Partial<Pick<ProfileConfig, 'autoLockMinutes' | 'defaultField'>>,
-	): Promise<void> {
+	): void {
 		const key = name.toLowerCase();
 		const settings = peek(this.settings);
 		if (!settings.profiles[key]) throw new Error(`Profile '${name}' not found.`);
@@ -204,7 +204,7 @@ export class ProfileService {
 	}
 
 	/** Renames a profile key in settings and updates any runtime references. */
-	async renameProfile(oldName: string, newName: string): Promise<void> {
+	renameProfile(oldName: string, newName: string): void {
 		const oldKey = oldName.toLowerCase();
 		const newKey = newName.toLowerCase();
 		const settings = peek(this.settings);

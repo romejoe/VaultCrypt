@@ -31,8 +31,7 @@ export class AddProfileModal extends Modal {
 			.setName("Profile name")
 			.setDesc("Alphanumeric and hyphens only (for example, my-profile)")
 			.addText(text => text
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				.setPlaceholder("my-profile")
+				.setPlaceholder("My-profile")
 				.onChange(value => {
 					this.name = value;
 				}));
@@ -217,7 +216,6 @@ export class EditProfileModal extends Modal {
 		this.titleEl.setText("Edit profile");
 
 		new Setting(contentEl).setName("Profile name").setDesc(this.profileName);
-		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		new Setting(contentEl).setName("KDBX version").setDesc(String(this.config.kdbxVersion));
 		new Setting(contentEl).setName("Path").setDesc(this.config.path);
 
@@ -253,13 +251,13 @@ export class EditProfileModal extends Modal {
 			});
 	}
 
-	private async submit() {
+	private submit() {
 		if (this.isSubmitting) return;
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
 		try {
-			await this.plugin.editProfile(this.profileName, {
+			this.plugin.editProfile(this.profileName, {
 				autoLockMinutes: this.autoLockMinutes,
 				defaultField: this.defaultField,
 			});
@@ -379,7 +377,7 @@ export class RenameProfileModal extends Modal {
 				);
 			}
 			try {
-				await this.plugin.renameProfile(this.currentName, this.newName);
+				this.plugin.renameProfile(this.currentName, this.newName);
 			} catch (e) {
 				if (this.isManagedByKeyring) {
 					try {
