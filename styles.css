@@ -12,6 +12,14 @@ If your plugin does not need CSS, delete this file.
 	display: none;
 }
 
+/* Elapsed time indicator shown while a profile is being unlocked */
+.vaultcrypt-unlock-progress {
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	margin: 4px 0 0;
+}
+
 .vaultcrypt-flex {
 	display: flex;
 }

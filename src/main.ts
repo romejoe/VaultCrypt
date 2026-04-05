@@ -340,10 +340,21 @@ export default class VaultCryptPlugin extends Plugin {
 					.filter(profileId => !this.sessionService.isUnlocked(profileId))
 			);
 
-			if (settings.security.autoUnlock) {
-				await this.secretStorageService.autoUnlockProfiles(
-					settings, lockedProfileIds, this.sessionService, this.keyringService,
-				);
+			if (settings.security.autoUnlock && lockedProfileIds.size > 0) {
+				const beforeAutoUnlock = new Set(lockedProfileIds);
+				const unlockingNotice = new Notice('Unlocking saved profiles...', 0);
+				try {
+					await this.secretStorageService.autoUnlockProfiles(
+						settings, lockedProfileIds, this.sessionService, this.keyringService,
+					);
+				} finally {
+					unlockingNotice.hide();
+				}
+				for (const profileId of beforeAutoUnlock) {
+					if (!lockedProfileIds.has(profileId)) {
+						new Notice(`Profile "${profileId}" unlocked.`);
+					}
+				}
 			}
 
 			// Check if any remaining locked profiles are keyring-managed
