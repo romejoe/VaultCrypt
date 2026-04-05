@@ -31,7 +31,11 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		...builtinModules],
+		...builtinModules.filter(m => m !== 'crypto')],
+	alias: {
+		'crypto': './src/crypto-shim.ts',
+		'node:crypto': './src/crypto-shim.ts',
+	},
 	format: "cjs",
 	target: "es2018",
 	logLevel: "info",
