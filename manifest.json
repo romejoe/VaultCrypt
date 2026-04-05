@@ -1,9 +1,9 @@
 {
 	"id": "vaultcrypt",
 	"name": "VaultCrypt",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"minAppVersion": "1.11.4",
-	"description": "Inline encryption for notes using KeePass-compatible (.kdbx) storage",
+	"description": "Inline encryption for sensitive fields in notes using KeePass-compatible (.kdbx) storage.",
 	"author": "romejoe",
 	"authorUrl": "https://github.com/romejoe",
 	"isDesktopOnly": false,
