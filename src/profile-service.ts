@@ -26,14 +26,26 @@ export class ProfileService {
 	async ensureVaultCryptDir(): Promise<void> {
 		const dirPath = peek(this.settings).general.vaultCryptDir;
 		try {
-			if (!this.app.vault.getAbstractFileByPath(dirPath)) {
-				await this.app.vault.createFolder(dirPath);
-			}
+			await this.ensureFolderPath(dirPath);
 		} catch (e) {
 			console.error('Error creating VaultCrypt directory:', e);
 			const msg = e instanceof Error ? e.message : String(e);
 			new Notice(`Error creating VaultCrypt directory: ${msg}`);
 			throw e;
+		}
+	}
+
+	/**
+	 * Ensures every segment of a vault-relative path exists as a folder,
+	 * creating any missing intermediate directories. Equivalent to mkdir -p.
+	 */
+	private async ensureFolderPath(path: string): Promise<void> {
+		const segments = path.split('/').filter(Boolean);
+		for (let i = 1; i <= segments.length; i++) {
+			const partial = segments.slice(0, i).join('/');
+			if (!this.app.vault.getAbstractFileByPath(partial)) {
+				await this.app.vault.createFolder(partial);
+			}
 		}
 	}
 
@@ -49,6 +61,9 @@ export class ProfileService {
 		const settings = peek(this.settings);
 		const oldDir = settings.general.vaultCryptDir;
 		if (oldDir === newDir) return;
+		if (newDir.startsWith(`${oldDir}/`)) {
+			throw new Error(`Target path "${newDir}" cannot be inside the current vault directory "${oldDir}".`);
+		}
 
 		// Gather a recursive listing of everything under oldDir
 		const allFiles: string[] = [];
@@ -64,10 +79,10 @@ export class ProfileService {
 		// Create destination root and any sub-directories (in discovery order
 		// so parents are created before their children)
 		try {
-			await this.app.vault.createFolder(newDir);
+			await this.ensureFolderPath(newDir);
 			for (const folderPath of allFolders) {
 				const rel = folderPath.substring(oldDir.length + 1);
-				await this.app.vault.createFolder(`${newDir}/${rel}`);
+				await this.ensureFolderPath(`${newDir}/${rel}`);
 			}
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);

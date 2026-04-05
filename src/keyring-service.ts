@@ -1,4 +1,4 @@
-import {App} from 'obsidian';
+import {App, TFile} from 'obsidian';
 import {KdbxService} from './kdbx-service';
 import {getVaultFile} from './utils';
 
@@ -17,7 +17,7 @@ export class KeyringService {
 
 	/** Checks whether the keyring file exists on disk. */
 	async keyringExists(path: string): Promise<boolean> {
-		return this.app.vault.getAbstractFileByPath(path) !== null;
+		return this.app.vault.getAbstractFileByPath(path) instanceof TFile;
 	}
 
 	/** Creates a new KDBX 4.x keyring with hardened KDF parameters. */
