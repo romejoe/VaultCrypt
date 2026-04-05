@@ -3,7 +3,7 @@
 	"name": "VaultCrypt",
 	"version": "0.4.0",
 	"minAppVersion": "1.11.4",
-	"description": "Inline encryption for Obsidian notes using KeePass-compatible (.kdbx) storage",
+	"description": "Inline encryption for notes using KeePass-compatible (.kdbx) storage",
 	"author": "romejoe",
 	"authorUrl": "https://github.com/romejoe",
 	"isDesktopOnly": false,

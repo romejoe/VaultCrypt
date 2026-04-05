@@ -1,6 +1,6 @@
 # VaultCrypt
 
-**Inline encryption for Obsidian notes using KeePass-compatible (`.kdbx`) storage.**
+**Inline encryption for notes using KeePass-compatible (`.kdbx`) storage.**
 
 Reference secrets in your Markdown notes with tokens like `{{vc:profileId/path/to/entry#fieldName}}`. They render as interactive "chips" — masked by default, never exposing plaintext in your notes.
 
