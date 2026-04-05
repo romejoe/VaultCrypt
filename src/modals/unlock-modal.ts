@@ -180,6 +180,13 @@ export class UnlockModal extends Modal {
 		this.rememberToggle?.setValue(this.rememberPassword);
 	}
 
+	private clearProgressTimer() {
+		if (this.progressTimer !== null) {
+			window.clearInterval(this.progressTimer);
+			this.progressTimer = null;
+		}
+	}
+
 	private showError(msg: string) {
 		this.errorEl.textContent = msg;
 		this.errorEl.removeClass("vaultcrypt-hidden");
@@ -266,10 +273,7 @@ export class UnlockModal extends Modal {
 			this.showError("Incorrect password or corrupted database.");
 		} finally {
 			this.isSubmitting = false;
-			if (this.progressTimer !== null) {
-				window.clearInterval(this.progressTimer);
-				this.progressTimer = null;
-			}
+			this.clearProgressTimer();
 			this.progressEl.addClass("vaultcrypt-hidden");
 			this.submitBtn.setButtonText("Unlock");
 			this.submitBtn.setDisabled(false);
@@ -278,6 +282,7 @@ export class UnlockModal extends Modal {
 	}
 
 	onClose() {
+		this.clearProgressTimer();
 		this.contentEl.empty();
 	}
 }
