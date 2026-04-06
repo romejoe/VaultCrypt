@@ -137,7 +137,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 
 		if (Platform.isDesktop) {
 			menu.addItem(item => item
-				.setTitle('Open in KeePassXC')
+				.setTitle('Open database file')
 				.setIcon('external-link')
 				.onClick(async () => {
 					const config = peek(profileConfig);
@@ -654,29 +654,6 @@ function copyField(
 	}
 
 	navigator.clipboard.writeText(value).then(onCopySuccess).catch(() => {
-		// Fallback for mobile WebViews where the Clipboard API may be unavailable
-		let textarea: HTMLTextAreaElement|null = null;
-		try {
-			textarea = document.createElement('textarea');
-			textarea.value = value;
-			// eslint-disable-next-line obsidianmd/no-static-styles-assignment
-			textarea.style.cssText = 'position:fixed;opacity:0;';
-			document.body.appendChild(textarea);
-			textarea.focus();
-			textarea.select();
-			// eslint-disable-next-line @typescript-eslint/no-deprecated
-			const ok = document.execCommand('copy');
-			document.body.removeChild(textarea);
-			if (ok) {
-				onCopySuccess();
-			} else {
-				new Notice('Failed to copy to clipboard');
-			}
-		} catch {
-			if(textarea !== null){
-				textarea.remove();
-			}
-			new Notice('Failed to copy to clipboard');
-		}
+		new Notice('Failed to copy to clipboard');
 	});
 }

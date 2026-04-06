@@ -216,7 +216,7 @@ export class EditProfileModal extends Modal {
 		this.titleEl.setText("Edit profile");
 
 		new Setting(contentEl).setName("Profile name").setDesc(this.profileName);
-		new Setting(contentEl).setName("KDBX version").setDesc(String(this.config.kdbxVersion));
+		new Setting(contentEl).setName('Database version').setDesc(String(this.config.kdbxVersion));
 		new Setting(contentEl).setName("Path").setDesc(this.config.path);
 
 		new Setting(contentEl)

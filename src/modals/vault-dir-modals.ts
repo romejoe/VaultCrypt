@@ -17,7 +17,7 @@ export class SyncWarningModal extends Modal {
 		const {contentEl} = this;
 		const currentDir = this.plugin.settings.general.vaultCryptDir;
 
-		this.titleEl.setText('VaultCrypt sync notice');
+		this.titleEl.setText('Sync notice');
 
 		contentEl.createEl('p', {
 			text: `Your VaultCrypt folder ("${currentDir}") starts with a dot. `
@@ -26,18 +26,18 @@ export class SyncWarningModal extends Modal {
 		});
 
 		contentEl.createEl('p', {
-			text: 'Would you like to move it to "VaultCrypt" (a visible folder that Obsidian Sync will include)?',
+			text: 'Would you like to move it to a visible folder so Obsidian Sync can include it?',
 		});
 
 		new Setting(contentEl)
 			.addButton(btn => btn
-				.setButtonText('Move to "VaultCrypt"')
+				.setButtonText('Move to visible folder')
 				.setCta()
 				.onClick(async () => {
 					this.close();
 					try {
 						await this.plugin.profileService.moveVaultDir('VaultCrypt');
-						new Notice('VaultCrypt: directory moved to "VaultCrypt".');
+						new Notice('Directory moved to visible location.');
 					} catch {
 						// moveVaultDir already shows a Notice on failure
 					}
@@ -87,7 +87,7 @@ export class MoveVaultDirModal extends Modal {
 		const {contentEl} = this;
 		const currentDir = this.plugin.settings.general.vaultCryptDir;
 
-		this.titleEl.setText('Change VaultCrypt directory');
+		this.titleEl.setText('Change storage directory');
 
 		new Setting(contentEl)
 			.setName('New directory path')
@@ -101,7 +101,7 @@ export class MoveVaultDirModal extends Modal {
 
 		new Setting(contentEl)
 			.setName('Move existing files')
-			.setDesc('Move .KDBX databases and other files from the current directory to the new location.')
+			.setDesc('Move database files and attachments from the current directory to the new location.')
 			.addToggle(toggle => toggle
 				.setValue(this.moveFiles)
 				.onChange(value => {
