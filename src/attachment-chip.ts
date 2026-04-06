@@ -459,7 +459,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 						new Notice('Failed to save: filesystem API unavailable');
 						return;
 					}
-					// eslint-disable-next-line no-undef -- Buffer is a Node.js global available in Electron
 					await fs.writeFile(result.filePath, Buffer.from(data));
 					new Notice(`Saved to ${result.filePath}`);
 				} catch (err) {

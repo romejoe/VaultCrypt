@@ -152,7 +152,7 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 
 		// Ribbon icon → unlock modal (prefers keyring when available)
-		this.addRibbonIcon('lock', 'VaultCrypt', () => {
+		this.addRibbonIcon('lock', 'Manage secrets', () => {
 			if (this.shouldUseKeyringUnlock()) {
 				new KeyringUnlockModal(this.app, this, () => {
 					// Chain to per-profile unlock for non-managed locked profiles
@@ -312,7 +312,7 @@ export default class VaultCryptPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor) => {
 				menu.addItem(item => item
-					.setTitle('VaultCrypt: insert secret here')
+					.setTitle('Insert secret here')
 					.setIcon('key')
 					.onClick(() => new InsertSecretModal(this.app, this, editor).open()));
 			})
@@ -425,7 +425,7 @@ export default class VaultCryptPlugin extends Plugin {
 					return;
 				}
 				if (profiles.length === 0) {
-					this.statusBarItem.setText('🔒 VaultCrypt');
+					this.statusBarItem.setText('No profiles');
 					return;
 				}
 				const parts = profiles.map(p => (p.isLocked ? '🔒 ' : '🔓 ') + p.name);

@@ -223,7 +223,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Vault").setHeading();
 
 		new Setting(containerEl)
-			.setName('VaultCrypt directory path')
+			.setName('Storage directory')
 			.setDesc(`Current: ${this.plugin.settings.general.vaultCryptDir} — Folder where .kdbx databases are stored.`)
 			.addButton(btn => btn
 				.setButtonText('Change directory')
