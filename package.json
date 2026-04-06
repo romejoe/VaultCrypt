@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-vault-crypt",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"description": "Obsidian plugin for inline encryption of sensitive values using KeePass-compatible (.kdbx) storage",
 	"main": "main.js",
 	"type": "module",
