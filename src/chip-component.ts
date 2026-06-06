@@ -44,6 +44,9 @@ export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin)
 function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
 	let effects: StopEffect[] = [];
+	if(token.raw.includes("fooQwerty123")){
+		console.log("Debug: Building chip for token", token);
+	}
 	const profileConfig = computed(() => {
 		return plugin.settings$().profiles[profileId];
 	});
