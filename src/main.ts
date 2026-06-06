@@ -89,10 +89,13 @@ export default class VaultCryptPlugin extends Plugin {
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
-	async onload() {
+	onload(): void {
 		this.app.workspace.onLayoutReady(() => {
 			// Delay loading until layout is ready to avoid issues with the vault not being fully initialized.
-			this.initializePlugin();
+			this.initializePlugin().catch(err => {
+				console.error('Error initializing VaultCrypt plugin:', err);
+				new Notice('Error initializing VaultCrypt plugin. Please check the console for details.');
+			});
 		});
 	}
 
