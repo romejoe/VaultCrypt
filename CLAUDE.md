@@ -35,7 +35,7 @@ Effects on these signals update editor decorations and the status bar automatica
 | `kdbx-service.ts` | KDBX database creation, loading, entry/field CRUD; registers Argon2 |
 | `unlock-session.ts` | In-memory unlocked databases, auto-lock timers, lock/unlock callbacks |
 | `keyring-service.ts` | Master keyring KDBX storing profile passwords (optional feature) |
-| `profile-service.ts` | Profile CRUD, `.vaultcrypt/` directory and config file management |
+| `profile-service.ts` | Profile CRUD, `VaultCrypt/` directory and config file management |
 | `settings.ts` | `VaultCryptSettingTab`, settings interfaces, defaults |
 | `types.ts` | Core interfaces (`VaultCryptProfile`, `VaultCryptState`) |
 
@@ -50,9 +50,9 @@ Effects on these signals update editor decorations and the status bar automatica
 ### Data Persistence
 
 - **Plugin settings** (`data.json`) — Obsidian `loadData()`/`saveData()` for profile paths, keyring status, timeouts
-- **Config mirror** (`.vaultcrypt/vaultcrypt.config.json`) — JSON mirror readable by external tools
-- **Profile databases** (`.vaultcrypt/{profileId}.kdbx`) — KeePass v3/v4 files
-- **Keyring** (`.vaultcrypt/_keyring.kdbx`) — optional master keyring
+- **Config mirror** (`VaultCrypt/vaultcrypt.config.json`) — JSON mirror readable by external tools
+- **Profile databases** (`VaultCrypt/{profileId}.kdbx`) — KeePass v3/v4 files
+- **Keyring** (`VaultCrypt/_keyring.kdbx`) — optional master keyring
 
 ### Security Design
 
