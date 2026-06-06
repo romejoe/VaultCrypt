@@ -90,6 +90,13 @@ export default class VaultCryptPlugin extends Plugin {
 	private editorExtension?: Extension;
 
 	async onload() {
+		this.app.workspace.onLayoutReady(() => {
+			// Delay loading until layout is ready to avoid issues with the vault not being fully initialized.
+			this.initializePlugin();
+		});
+	}
+
+	private async initializePlugin() {
 		await this.loadSettings();
 		this._vaultCryptState$.set({
 			profiles: [],
@@ -118,7 +125,7 @@ export default class VaultCryptPlugin extends Plugin {
 		// Populate runtime state from persisted settings
 		this.initRuntimeState();
 
-		// Ensure the .vaultcrypt directory exists
+		// Ensure the VaultCrypt directory exists
 		await this.profileService.ensureVaultCryptDir();
 
 		// Warn once if the vault directory is hidden and Obsidian Sync won't include it

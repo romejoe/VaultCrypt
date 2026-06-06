@@ -22,7 +22,7 @@ export class ProfileService {
 	) {
 	}
 
-	/** Creates the .vaultcrypt directory if it doesn't exist. */
+	/** Creates the VaultCrypt directory if it doesn't exist. */
 	async ensureVaultCryptDir(): Promise<void> {
 		const dirPath = peek(this.settings).general.vaultCryptDir;
 		try {
