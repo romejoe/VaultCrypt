@@ -1,23 +1,23 @@
-import {Editor, MarkdownView, Menu, Notice, Platform, Plugin, TFile} from 'obsidian';
-import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
-import {KdbxService, KdbxVersion} from './kdbx-service';
-import {ProfileService} from './profile-service';
-import {UnlockSessionService} from './unlock-session';
-import {KeyringService} from './keyring-service';
-import {UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal, SyncWarningModal} from './modals';
-import {VaultCryptProfile, VaultCryptState} from './types';
-import {buildEditorExtension, refreshChipsEffect} from './editor-extension';
-import {parseVcTokens, processVcTokensInDom, resolveFieldName} from './inline-parser';
-import {buildChipElement} from './chip-component';
-import {revokeAttachmentVideoCache} from './attachment-chip';
-import {buildCopyTextFromSelection} from './clipboard-intercept';
-import {SecretStorageService} from './secret-storage-service';
-import {EditorView} from '@codemirror/view';
-import {Extension} from "@codemirror/state";
-import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
-import {deepFreeze, DeepReadonly} from "./utils";
+import { Editor, MarkdownView, Menu, Notice, Platform, Plugin, TFile, WorkspaceLeaf } from 'obsidian';
+import { DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab } from './settings';
+import { KdbxService, KdbxVersion } from './kdbx-service';
+import { ProfileService } from './profile-service';
+import { UnlockSessionService } from './unlock-session';
+import { KeyringService } from './keyring-service';
+import { UnlockModal, KeyringUnlockModal, InsertSecretModal, SearchSecretsModal, SyncWarningModal } from './modals';
+import { VaultCryptProfile, VaultCryptState, WorkspaceLeafRebuild } from './types';
+import { buildEditorExtension, refreshChipsEffect } from './editor-extension';
+import { parseVcTokens, processVcTokensInDom, resolveFieldName } from './inline-parser';
+import { buildChipElement } from './chip-component';
+import { revokeAttachmentVideoCache } from './attachment-chip';
+import { buildCopyTextFromSelection } from './clipboard-intercept';
+import { SecretStorageService } from './secret-storage-service';
+import { EditorView } from '@codemirror/view';
+import { Extension } from "@codemirror/state";
+import { computed, effect, peek, signal, StopEffect } from "@maverick-js/signals";
+import { deepFreeze, DeepReadonly } from "./utils";
 
-export type {VaultCryptProfile, VaultCryptState};
+export type { VaultCryptProfile, VaultCryptState };
 
 declare module 'obsidian' {
 	interface View {
@@ -42,7 +42,7 @@ interface ElectronClipboard {
 
 function getElectronClipboard(): ElectronClipboard | null {
 	try {
-		if(!Platform.isDesktop){
+		if (!Platform.isDesktop) {
 			return null;
 		}
 		type ElectronModule = { clipboard?: ElectronClipboard };
@@ -89,18 +89,80 @@ export default class VaultCryptPlugin extends Plugin {
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
-	onload(): void {
-		this.app.workspace.onLayoutReady(() => {
-			// Delay loading until layout is ready to avoid issues with the vault not being fully initialized.
-			this.initializePlugin().catch(err => {
-				console.error('Error initializing VaultCrypt plugin:', err);
-				new Notice('Error initializing VaultCrypt plugin. Please check the console for details.');
-			});
+	async onload(): Promise<void> {
+		await this.loadSettings();
+
+		// CodeMirror extension for source / live preview decoration
+		
+		this.registerEditorExtension(buildEditorExtension(this));
+
+		// Reading mode post-processor
+		this.registerMarkdownPostProcessor((el) => {
+			processVcTokensInDom(el, (token) => buildChipElement(token, this));
 		});
+		// Make existing editor views pick up newly registered CM6 extensions.
+		this.app.workspace.updateOptions();
+		try {
+			console.log(this.app.workspace.getLayout());
+			await this.initializePlugin();
+		} catch (err) {
+			// Catch and ignore errors from getLayout, which can fail if the workspace isn't fully initialized yet.
+			this.app.workspace.onLayoutReady(() => {
+				// Delay loading until layout is ready to avoid issues with the vault not being fully initialized.
+				this.initializePlugin().then(() => {
+
+				}).catch(err => {
+					console.error('Error initializing VaultCrypt plugin:', err);
+					new Notice('Error initializing VaultCrypt plugin. Please check the console for details.');
+				});
+			});
+
+
+		}
+
+		// this.refreshOpenMarkdownViews();
 	}
+	// private refreshOpenMarkdownViews(): void {
+	// 	this.app.workspace.updateOptions();
+
+	// 	for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+	// 		void this.refreshMarkdownLeaf(leaf);
+	// 	}
+	// }
+
+	// private async refreshMarkdownLeaf(leaf: WorkspaceLeaf): Promise<void> {
+	// 	// console.log('Refreshing markdown leaf', { leaf, view: leaf.view });
+
+	// 	// Important for background/deferred tabs.
+	// 	if (leaf.isDeferred) {
+	// 		await leaf.loadIfDeferred();
+	// 	}
+
+	// 	const view = leaf.view;
+
+	// 	if (!(view instanceof MarkdownView)) {
+	// 		return;
+	// 	}
+
+	// 	// Refresh CodeMirror decorations in source/live-preview mode.
+	// 	const editorView = (view.editor as unknown as { cm?: EditorView }).cm;
+
+	// 	if (editorView) {
+	// 		editorView.dispatch({
+	// 			effects: refreshChipsEffect.of(null),
+	// 		});
+	// 	}
+
+	// 	// Force reading-mode Markdown post-processors to rerun.
+	// 	if (view.getMode() === "preview") {
+	// 		const state = leaf.getViewState();
+	// 		await leaf.setViewState(state, { focus: false });
+	// 	}
+	// }
+
 
 	private async initializePlugin() {
-		await this.loadSettings();
+
 		this._vaultCryptState$.set({
 			profiles: [],
 			currentProfile: null,
@@ -260,7 +322,7 @@ export default class VaultCryptPlugin extends Plugin {
 						.onClick(() => this.sessionService.lockProfile(p.id)));
 				}
 				// Position near the status bar (approximate)
-				menu.showAtPosition({x: window.innerWidth / 2, y: window.innerHeight - 40});
+				menu.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight - 40 });
 			}
 		});
 
@@ -327,6 +389,13 @@ export default class VaultCryptPlugin extends Plugin {
 					.onClick(() => new InsertSecretModal(this.app, this, editor).open()));
 			})
 		);
+		// this.registerEvent(
+		// 	this.app.workspace.on("active-leaf-change", (leaf) => {
+		// 		if (leaf) {
+		// 			void this.refreshMarkdownLeaf(leaf);
+		// 		}
+		// 	}),
+		// );
 
 		// Auto-prompt when a note containing {{vc:...}} references is opened
 		this.registerEvent(this.app.workspace.on('file-open', async (file: TFile | null) => {
@@ -376,7 +445,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 			if (hasLockedManagedProfiles && settings.keyringEnabled) {
 				const notice = new Notice('Locked profiles detected. ', 5_000);
-				const btn = notice.messageEl.createEl('button', {text: 'Unlock with keyring'});
+				const btn = notice.messageEl.createEl('button', { text: 'Unlock with keyring' });
 				btn.addEventListener('click', () => {
 					notice.hide();
 					new KeyringUnlockModal(this.app, this).open();
@@ -386,21 +455,16 @@ export default class VaultCryptPlugin extends Plugin {
 			for (const profileId of lockedProfileIds) {
 				if (settings.profiles[profileId]?.managedByKeyring && settings.keyringEnabled) continue;
 				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
-				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
+				const btn = notice.messageEl.createEl('button', { text: 'Unlock' });
 				btn.addEventListener('click', () => {
 					notice.hide();
 					new UnlockModal(this.app, this, profileId).open();
 				});
 			}
+			// this.refreshOpenMarkdownViews();
+
 		}));
 
-		// CodeMirror extension for source / live preview decoration
-		this.registerEditorExtension(buildEditorExtension(this));
-
-		// Reading mode post-processor
-		this.registerMarkdownPostProcessor((el) => {
-			processVcTokensInDom(el, (token) => buildChipElement(token, this));
-		});
 
 		// Clipboard interception for reading mode (CM6 is handled in editor-extension.ts)
 		this.registerDomEvent(document, 'copy', (event: ClipboardEvent) => {
@@ -443,6 +507,8 @@ export default class VaultCryptPlugin extends Plugin {
 			})
 		];
 
+		this.refreshChips();
+		this.rebuildMarkdownLeaves();
 	}
 
 	onunload() {
@@ -453,6 +519,27 @@ export default class VaultCryptPlugin extends Plugin {
 			window.clearTimeout(timeoutId);
 		}
 		this.sessionService?.lockAll();
+this.registerEditorExtension([]); // Clear editor extensions to avoid errors in orphaned editors after unload
+this.registerMarkdownPostProcessor(() => { }); // Clear post processors to avoid errors in orphaned views after unload
+this.rebuildMarkdownLeaves();
+		// setTimeout(() => {
+		// 	this.rebuildMarkdownLeaves();
+		// }, 10_000);
+		
+	}
+
+	private rebuildMarkdownLeaves(): void {
+		this.app.workspace.updateOptions();
+		this.app.workspace.iterateAllLeaves(leaf => {
+			// console.log('Refreshing chips for leaf: ' + leaf.getDisplayText(), { leaf, view: leaf.view }, leaf.view instanceof MarkdownView);
+			if (leaf.view instanceof MarkdownView) {
+				// debugger;
+				// (leaf as unknown as { rebuildView?: () => void }).rebuildView?.();
+				(leaf as WorkspaceLeafRebuild).rebuildView();
+				leaf.view.previewMode.rerender(true);
+				leaf.view.editor.refresh();
+			}
+		});
 	}
 
 	async loadSettings() {
@@ -487,7 +574,7 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Migrate: ensure managedByKeyring exists on all profiles
 		for (const config of Object.values(newSettings.profiles)) {
-			if ((config as ProfileConfig & {managedByKeyring?: boolean}).managedByKeyring === undefined) {
+			if ((config as ProfileConfig & { managedByKeyring?: boolean }).managedByKeyring === undefined) {
 				config.managedByKeyring = false;
 			}
 		}
@@ -604,13 +691,25 @@ export default class VaultCryptPlugin extends Plugin {
 	 * Refreshes all chip decorations in both CM6 live-preview editors and
 	 * reading-mode post-processed views.  Call after mutating KDBX data.
 	 */
-	public refreshChips(): void {
+	public async refreshChips(): Promise<void> {
 		this.refreshAllEditorChips();
-		this.app.workspace.iterateAllLeaves(leaf => {
-			if (leaf.view instanceof MarkdownView) {
-				leaf.view.previewMode.rerender(true);
-			}
-		});
+		const markdownLeaves: WorkspaceLeaf[] = [];
+		// this.app.workspace.iterateAllLeaves(leaf => {
+		// 	// console.log('Refreshing chips for leaf: ' + leaf.getDisplayText(), { leaf, view: leaf.view }, leaf.view instanceof MarkdownView);
+		// 	if (leaf.view instanceof MarkdownView) {
+		// 		// debugger;
+		// 		// (leaf as unknown as { rebuildView?: () => void }).rebuildView?.();
+		// 		(leaf as WorkspaceLeafRebuild).rebuildView();
+		// 		leaf.view.previewMode.rerender(true);
+		// 		leaf.view.editor.refresh();
+		// 	}
+		// });
+		// for (const leaf of markdownLeaves) {
+		// 	await leaf.setViewState(leaf.getViewState(), { focus: false });
+		// 	// (leaf as unknown as { rebuildView?: () => void }).rebuildView?.();
+
+		// }
+
 	}
 
 	/**
@@ -619,13 +718,14 @@ export default class VaultCryptPlugin extends Plugin {
 	 */
 	private refreshAllEditorChips(): void {
 		this.app.workspace.iterateAllLeaves(leaf => {
+			// console.log('Refreshing editor chips for leaf', { leaf, view: leaf.view });
 			// Obsidian wraps the CodeMirror EditorView as editor.cm (semi-private)
 			const cm: EditorView | undefined = leaf.view?.editor?.cm;
 			if (!cm) {
-				console.debug('[VaultCrypt] No CodeMirror editor found in leaf:', leaf);
+				// console.debug('[VaultCrypt] No CodeMirror editor found in leaf:', leaf);
 				return;
 			}
-			cm.dispatch({effects: refreshChipsEffect.of(undefined)});
+			cm.dispatch({ effects: refreshChipsEffect.of(undefined) });
 		});
 	}
 
