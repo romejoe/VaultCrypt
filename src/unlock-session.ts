@@ -2,6 +2,7 @@ import {App} from 'obsidian';
 import {getVaultFile} from './utils';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
+import {signal} from '@maverick-js/signals';
 
 const PROTECTED_FIELDS = new Set(['Password']);
 
@@ -47,6 +48,7 @@ export class UnlockSessionService {
 	private timers = new Map<string, number>();
 	private lockCallbacks: LockCallback[] = [];
 	private unlockCallbacks: UnlockCallback[] = [];
+	private readonly fieldRevision$ = signal(0);
 
 	constructor(private app: App) {
 	}
@@ -137,8 +139,10 @@ export class UnlockSessionService {
 	 * Reads a single field value from an open profile's database.
 	 * Returns the plaintext string, or null if the profile is locked or the
 	 * entry/field cannot be found.
+	 * Signal effects that read a field are refreshed after persisted field changes.
 	 */
 	getFieldValue(profileId: string, entryPath: string, fieldName: string): string | null {
+		this.fieldRevision$();
 		const db = this.getDatabase(profileId);
 		if (!db) return null;
 
@@ -178,6 +182,7 @@ export class UnlockSessionService {
 
 		const buffer = await db.save();
 		await this.saveKdbx(kdbxFilePath, buffer);
+		this.fieldRevision$.set(revision => revision + 1);
 	}
 
 	/**
@@ -255,6 +260,7 @@ export class UnlockSessionService {
 			for (const [k, v] of snapshot) entry.fields.set(k, v);
 			throw err;
 		}
+		this.fieldRevision$.set(revision => revision + 1);
 	}
 
 	/**
@@ -285,6 +291,7 @@ export class UnlockSessionService {
 			this.lockProfile(profileId);
 			throw err;
 		}
+		this.fieldRevision$.set(revision => revision + 1);
 	}
 
 	/**
@@ -455,6 +462,7 @@ export class UnlockSessionService {
 
 		const buffer = await db.save();
 		await this.saveKdbx(kdbxFilePath, buffer);
+		this.fieldRevision$.set(revision => revision + 1);
 	}
 
 	/** Register a callback to be called when any profile is locked. */

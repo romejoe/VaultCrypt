@@ -1,12 +1,18 @@
-# Startup regression checks
+# Regression checks
 
-Run `npm test` to exercise the real profile service with an in-memory Obsidian
-runtime mock. The tests do not read or modify a vault. CI runs them alongside
-the build and lint checks.
+Run `npm test` to exercise the real services with an in-memory Obsidian runtime
+mock. The tests do not read or modify a vault. CI runs them alongside the build
+and lint checks.
 
 The unindexed-folder cases reproduce [issue #81](https://github.com/romejoe/VaultCrypt/issues/81).
 Tests also cover nested directory creation, file collisions, concurrent folder
 creation, and disk errors.
+
+The chip-update cases reproduce [issue #59](https://github.com/romejoe/VaultCrypt/issues/59).
+They use the real session service, KDBX entry data, signals, chip templates, and
+editor widgets with DOM/template and CodeMirror mounting mocks. They cover entry
+and inline saves, duplicate references, masked/locked chips, missing fields,
+active edits, failed saves, and observer cleanup.
 
 ## Manual acceptance before merging
 
@@ -24,6 +30,11 @@ Do not use a production vault for file-collision or missing-directory checks.
   are not duplicated and there are no console errors.
 - Check an already-open note in live preview and reading mode, including secret
   tokens in a table. Confirm chips render, unlock, reveal, and copy as before.
+- Reveal duplicate references to a test field in both modes. Edit through
+  **Edit entry** and the inline editor; confirm every revealed reference updates
+  immediately, including selection-copy text and long-value tooltips. Masked
+  references must stay masked. Remove and restore a field and confirm its error
+  chip recovers without toggling mask/unmask.
 - With Obsidian closed and the test storage directory empty, replace that
   directory with a file at the same path. Restart and confirm a path-specific
   error appears and the file is preserved. Repeat for a parent path segment.
