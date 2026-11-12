@@ -38,7 +38,7 @@ export interface VaultCryptSettings {
 
 export const DEFAULT_SETTINGS: VaultCryptSettings = {
 	profiles: {},
-	masterKeyringPath: ".vaultcrypt/_keyring.kdbx",
+	masterKeyringPath: "VaultCrypt/_keyring.kdbx",
 	keyringEnabled: false,
 	security: {
 		autoLockTimeout: 300,
@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		autoUnlock: false,
 	},
 	general: {
-		vaultCryptDir: ".vaultcrypt",
+		vaultCryptDir: "VaultCrypt",
 		defaultProfile: "",
 		compactChips: false,
 		autoUnmask: false,

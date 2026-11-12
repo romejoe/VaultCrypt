@@ -1,4 +1,4 @@
-import {App, Notice} from 'obsidian';
+import {App, Notice, TFolder} from 'obsidian';
 import {getVaultFile, getVaultFolder} from './utils';
 import {ProfileConfig, VaultCryptSettings} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
@@ -22,7 +22,7 @@ export class ProfileService {
 	) {
 	}
 
-	/** Creates the .vaultcrypt directory if it doesn't exist. */
+	/** Creates the VaultCrypt directory if it doesn't exist. */
 	async ensureVaultCryptDir(): Promise<void> {
 		const dirPath = peek(this.settings).general.vaultCryptDir;
 		try {
@@ -43,8 +43,33 @@ export class ProfileService {
 		const segments = path.split('/').filter(Boolean);
 		for (let i = 1; i <= segments.length; i++) {
 			const partial = segments.slice(0, i).join('/');
-			if (!this.app.vault.getAbstractFileByPath(partial)) {
+			const indexed = this.app.vault.getAbstractFileByPath(partial);
+			if (indexed) {
+				if (!(indexed instanceof TFolder)) {
+					throw new Error(`Cannot create folder "${partial}": a file already exists at this path.`);
+				}
+				continue;
+			}
+
+			// The vault index may still be loading, and hidden folders may never be indexed.
+			const stat = await this.app.vault.adapter.stat(partial);
+			if (stat) {
+				if (stat.type !== 'folder') {
+					throw new Error(`Cannot create folder "${partial}": a file already exists at this path.`);
+				}
+				continue;
+			}
+
+			try {
 				await this.app.vault.createFolder(partial);
+			} catch (error) {
+				// Another operation may have created it since the check. Preserve genuine errors.
+				try {
+					if ((await this.app.vault.adapter.stat(partial))?.type === 'folder') continue;
+				} catch {
+					// Report the original creation error if the recheck also fails.
+				}
+				throw error;
 			}
 		}
 	}
