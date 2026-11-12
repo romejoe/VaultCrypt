@@ -144,8 +144,14 @@ export class ProfileService {
 
 		// Remove empty old sub-directories deepest-first, then the root. Hidden
 		// folders need adapter access, just like the files that were moved.
+		const failedCleanup: string[] = [];
 		for (const folderPath of [...allFolders].reverse().concat(oldDir)) {
-			try { await removeEmptyVaultFolder(this.app, folderPath); } catch { /* non-fatal */ }
+			try {
+				await removeEmptyVaultFolder(this.app, folderPath);
+			} catch (error) {
+				failedCleanup.push(folderPath);
+				console.warn(`VaultCrypt: could not remove empty folder ${folderPath}:`, error);
+			}
 		}
 
 		// Helper to remap a path prefix
@@ -174,6 +180,9 @@ export class ProfileService {
 				state.currentProfile.path = remap(state.currentProfile.path);
 			}
 		});
+		if (failedCleanup.length) {
+			new Notice(`VaultCrypt: files moved, but could not remove empty folders: ${failedCleanup.join(', ')}.`);
+		}
 	}
 
 	/** Recursively collects all files and folders under a directory. */

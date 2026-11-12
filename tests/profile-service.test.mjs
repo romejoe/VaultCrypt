@@ -137,7 +137,7 @@ test('initial disk inspection errors propagate without attempting creation', asy
 	assert.deepEqual(created, []);
 });
 
-function migrationFixture(t, {oldDir = '.vaultcrypt', indexed = false, failRename, beforeCleanup} = {}) {
+function migrationFixture(t, {oldDir = '.vaultcrypt', indexed = false, failRename, beforeCleanup, failCleanup} = {}) {
 	t.mock.method(console, 'warn', () => {});
 	Notice.messages.length = 0;
 	const disk = new Map([
@@ -181,10 +181,15 @@ function migrationFixture(t, {oldDir = '.vaultcrypt', indexed = false, failRenam
 				return list(path);
 			},
 			async rename(from, to) { rename(from, to, 'adapter'); },
-			async rmdir(path, recursive) {
-				assert.equal(recursive, false);
+			async rmdir() {
+				// Desktop adapters can delegate to fs.rm, which rejects directories
+				// with recursive=false even when they are empty.
+				throw Object.assign(new Error('Path is a directory'), {code: 'ERR_FS_EISDIR'});
+			},
+			async trashLocal(path) {
+				if (failCleanup) failCleanup(path);
 				assert.deepEqual(list(path), {files: [], folders: []});
-				calls.push(['rmdir', path]);
+				calls.push(['trashLocal', path]);
 				disk.delete(path);
 			},
 		},
@@ -308,4 +313,39 @@ test('rollback reports files it cannot restore and preserves conflicting files',
 	assert.equal(disk.get('.vaultcrypt/_keyring.kdbx'), 'keyring bytes');
 	assert.equal(settings.general.vaultCryptDir, '.vaultcrypt');
 	assert.match(Notice.messages.at(-1), /Could not restore these files: VaultCrypt\/whee.kdbx/);
+});
+
+test('unindexed empty source directories are trashed deepest first', async t => {
+	const {service, disk, calls} = migrationFixture(t);
+	disk.set('.vaultcrypt/empty', 'folder');
+	disk.set('.vaultcrypt/empty/nested', 'folder');
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal([...disk.keys()].some(path => path.startsWith('.vaultcrypt')), false);
+	assert.deepEqual(calls, [
+		['trashLocal', '.vaultcrypt/empty/nested'],
+		['trashLocal', '.vaultcrypt/empty'],
+		['trashLocal', '.vaultcrypt/attachments'],
+		['trashLocal', '.vaultcrypt'],
+	]);
+});
+
+test('an entirely empty unindexed source directory is removed', async t => {
+	const {service, disk, calls, settings} = migrationFixture(t);
+	for (const path of [...disk.keys()]) if (path !== '.vaultcrypt') disk.delete(path);
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal(disk.has('.vaultcrypt'), false);
+	assert.equal(settings.general.vaultCryptDir, 'VaultCrypt');
+	assert.deepEqual(calls, [['trashLocal', '.vaultcrypt']]);
+});
+
+test('cleanup failures are reported while keeping migrated paths and files', async t => {
+	const {service, disk, settings} = migrationFixture(t, {
+		failCleanup() { throw new Error('Trash denied'); },
+	});
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal(disk.get('VaultCrypt/whee.kdbx'), 'profile bytes');
+	assert.equal(settings.profiles.whee.path, 'VaultCrypt/whee.kdbx');
+	assert.equal(disk.has('.vaultcrypt/attachments'), true);
+	assert.match(Notice.messages.at(-1), /could not remove empty folders: .vaultcrypt\/attachments/);
+	assert.equal(console.warn.mock.calls.length, 1);
 });

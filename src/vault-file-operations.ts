@@ -19,7 +19,7 @@ export async function moveVaultFile(app: App, from: string, to: string): Promise
 	}
 }
 
-/** Clean up migrated directories without recursively removing leftover files. */
+/** Check disk contents before trashing migrated directories, including hidden ones. */
 export async function removeEmptyVaultFolder(app: App, path: string): Promise<void> {
 	const listing = await app.vault.adapter.list(path);
 	if (listing.files.length || listing.folders.length) return;
@@ -27,6 +27,8 @@ export async function removeEmptyVaultFolder(app: App, path: string): Promise<vo
 	if (folder) {
 		await app.fileManager.trashFile(folder);
 	} else {
-		await app.vault.adapter.rmdir(path, false);
+		// Non-recursive adapter.rmdir can reject even empty folders on desktop.
+		// Use recoverable local trash after checking the adapter listing instead.
+		await app.vault.adapter.trashLocal(path);
 	}
 }

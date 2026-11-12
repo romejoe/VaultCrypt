@@ -19,6 +19,9 @@ Directory migration tests cover hidden-to-visible and visible-to-hidden moves,
 nested attachments and keyrings, path updates, destination collisions, and rollback
 when moved files are not indexed yet. They also verify that cleanup preserves
 new source files and that incomplete rollback is reported without replacing files.
+Cleanup checks simulate non-recursive directory-removal failures, verify that
+unindexed empty folders use local trash deepest first, and ensure cleanup errors
+are reported without undoing successful migration or its path updates.
 
 ## Manual acceptance before merging
 
@@ -44,6 +47,10 @@ Do not use a production vault for file-collision or missing-directory checks.
   from `.vaultcrypt` to `VaultCrypt` and back. Include profiles, a keyring, and a
   nested attachment folder. Confirm the files and configured paths move together,
   unlocking still works, and empty source folders are removed.
+- Include empty nested folders in the hidden source directory. Confirm they are
+  removed from the source and placed in the vault's `.trash` folder. If cleanup
+  fails, confirm the warning names the remaining folder and migrated profiles
+  still open from the new path.
 - In a disposable vault, place a different file at a matching destination path
   before moving. Confirm the move fails without replacing that file, earlier
   moves are rolled back, and configured paths remain at the original location.
