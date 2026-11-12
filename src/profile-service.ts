@@ -1,5 +1,6 @@
 import {App, Notice, TFolder} from 'obsidian';
-import {getVaultFile, getVaultFolder} from './utils';
+import {getVaultFile} from './utils';
+import {moveVaultFile, removeEmptyVaultFolder} from './vault-file-operations';
 import {ProfileConfig, VaultCryptSettings} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {VaultCryptState} from './types';
@@ -121,32 +122,31 @@ export class ProfileService {
 			for (const filePath of allFiles) {
 				const rel = filePath.substring(oldDir.length + 1);
 				const target = `${newDir}/${rel}`;
-				const file = getVaultFile(this.app, filePath);
-				if (!file) throw new Error(`File not found during move: ${filePath}`);
-				await this.app.vault.rename(file, target);
+				await moveVaultFile(this.app, filePath, target);
 				moved.push({ from: filePath, to: target });
 			}
 		} catch (e) {
+			const failedRollbacks: string[] = [];
 			for (const { from, to } of [...moved].reverse()) {
 				try {
-					const movedFile = getVaultFile(this.app, to);
-					if (movedFile) await this.app.vault.rename(movedFile, from);
+					await moveVaultFile(this.app, to, from);
 				} catch {
+					failedRollbacks.push(to);
 					console.warn(`VaultCrypt: rollback failed for ${to} → ${from}`);
 				}
 			}
 			const msg = e instanceof Error ? e.message : String(e);
-			new Notice(`VaultCrypt: failed to move directory — ${msg}`);
+			const rollbackMsg = failedRollbacks.length
+				? ` Could not restore these files: ${failedRollbacks.join(', ')}.` : '';
+			new Notice(`VaultCrypt: failed to move directory — ${msg}${rollbackMsg}`);
 			throw e;
 		}
 
-		// Remove old sub-directories deepest-first, then the root
-		for (const folderPath of [...allFolders].reverse()) {
-			const folder = getVaultFolder(this.app, folderPath);
-			if (folder) try { await this.app.fileManager.trashFile(folder); } catch { /* non-fatal */ }
+		// Remove empty old sub-directories deepest-first, then the root. Hidden
+		// folders need adapter access, just like the files that were moved.
+		for (const folderPath of [...allFolders].reverse().concat(oldDir)) {
+			try { await removeEmptyVaultFolder(this.app, folderPath); } catch { /* non-fatal */ }
 		}
-		const oldFolder = getVaultFolder(this.app, oldDir);
-		if (oldFolder) try { await this.app.fileManager.trashFile(oldFolder); } catch { /* non-fatal */ }
 
 		// Helper to remap a path prefix
 		const remap = (p: string) =>

@@ -15,6 +15,11 @@ Both hidden and visible unindexed paths are checked, alongside indexed files.
 Missing files, adapter failures, folder collisions, and unlock-modal error messages
 are also covered. Production KDF defaults are unchanged.
 
+Directory migration tests cover hidden-to-visible and visible-to-hidden moves,
+nested attachments and keyrings, path updates, destination collisions, and rollback
+when moved files are not indexed yet. They also verify that cleanup preserves
+new source files and that incomplete rollback is reported without replacing files.
+
 ## Manual acceptance before merging
 
 Use a disposable Obsidian vault with test secrets only. Build with `npm run build`
@@ -35,6 +40,13 @@ Do not use a production vault for file-collision or missing-directory checks.
   With Obsidian closed, temporarily move a test database out of the vault. Restart
   and try unlocking it; confirm the error names the missing KDBX path. Restore it
   afterward. Repeat for a missing keyring and a missing keyring-managed profile.
+- Use **Change storage directory** with **Move existing files** enabled to move
+  from `.vaultcrypt` to `VaultCrypt` and back. Include profiles, a keyring, and a
+  nested attachment folder. Confirm the files and configured paths move together,
+  unlocking still works, and empty source folders are removed.
+- In a disposable vault, place a different file at a matching destination path
+  before moving. Confirm the move fails without replacing that file, earlier
+  moves are rolled back, and configured paths remain at the original location.
 - Disable and enable the plugin repeatedly; confirm commands and chip actions
   are not duplicated and there are no console errors.
 - Check an already-open note in live preview and reading mode, including secret
