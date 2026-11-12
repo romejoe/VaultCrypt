@@ -1,12 +1,12 @@
-import { editorLivePreviewField } from 'obsidian';
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
-import { Extension, RangeSetBuilder, StateEffect } from '@codemirror/state';
-import { autocompletion, Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { parseVcTokens, ParsedVcToken, VALID_TOKEN_SEGMENT } from './inline-parser';
-import { buildChipElement, CHIP_DESTROY_EVENT } from './chip-component';
-import { buildCopyTextFromEditorSelection } from './clipboard-intercept';
+import {editorLivePreviewField} from 'obsidian';
+import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType} from '@codemirror/view';
+import {Extension, RangeSetBuilder, StateEffect} from '@codemirror/state';
+import {autocompletion, Completion, CompletionContext, CompletionResult} from '@codemirror/autocomplete';
+import {parseVcTokens, ParsedVcToken, VALID_TOKEN_SEGMENT} from './inline-parser';
+import {buildChipElement, CHIP_DESTROY_EVENT} from './chip-component';
+import {buildCopyTextFromEditorSelection} from './clipboard-intercept';
 import type VaultCryptPlugin from './main';
-import type { DbTreeNode } from './unlock-session';
+import type {DbTreeNode} from './unlock-session';
 
 /** Dispatching this effect on an EditorView forces chip decorations to rebuild. */
 export const refreshChipsEffect = StateEffect.define<void>();
@@ -76,81 +76,6 @@ function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): Decoratio
 	return builder.finish();
 }
 
-// function buildDecorations(view: EditorView, plugin: VaultCryptPlugin): DecorationSet {
-// 	const isLivePreview = view.state.field(editorLivePreviewField, false) ?? false;
-// 	const builder = new RangeSetBuilder<Decoration>();
-// 	const cursorPos = view.state.selection.main.head;
-// 	const doc = view.state.doc;
-// 	const { from, to } = view.viewport;
-
-// 	// Expand to full lines so tokens do not get split by viewport boundaries.
-// 	const scanFrom = doc.lineAt(from).from;
-// 	const scanTo = doc.lineAt(to).to;
-
-// 	const text = view.state.doc.sliceString(scanFrom, scanTo);
-// 	const tokens = parseVcTokens(text);
-// 	// console.log('Parsed tokens in visible range:', tokens);
-
-// 	console.log("VaultCrypt scan debug", {
-// 		isLivePreview,
-// 		visibleRanges: view.visibleRanges,
-// 		selection: view.state.selection.ranges,
-// 		scanFrom,
-// 		scanTo,
-// 		text,
-// 		tokens: tokens.map((token) => {
-// 			const absFrom = scanFrom + token.from;
-// 			const absTo = scanFrom + token.to;
-
-// 			return {
-// 				raw: token.raw,
-// 				relativeFrom: token.from,
-// 				relativeTo: token.to,
-// 				absFrom,
-// 				absTo,
-// 				docTextAtToken: doc.sliceString(absFrom, absTo),
-// 				tokenSelected: view.state.selection.ranges.some((range) => {
-// 					const selectionFrom = Math.min(range.anchor, range.head);
-// 					const selectionTo = Math.max(range.anchor, range.head);
-
-// 					if (selectionFrom === selectionTo) {
-// 						return selectionFrom >= absFrom && selectionFrom < absTo;
-// 					}
-
-// 					return selectionFrom < absTo && selectionTo > absFrom;
-// 				}),
-// 			};
-// 		}),
-// 	});
-
-// 	for (const token of tokens) {
-
-// 		const absFrom = scanFrom + token.from;
-// 		const absTo = scanFrom + token.to;
-// 		const tokenSelected = cursorPos >= absFrom && cursorPos <= absTo;
-
-
-// 		if (tokenSelected) continue;
-
-// 		if (isLivePreview) {
-// 			builder.add(
-// 				absFrom,
-// 				absTo,
-// 				Decoration.replace({ widget: new VcTokenWidget(token, plugin) }),
-// 			);
-// 		} else {
-// 			builder.add(
-// 				absFrom,
-// 				absTo,
-// 				Decoration.mark({ class: 'vaultcrypt-token' }),
-// 			);
-// 		}
-// 	}
-
-
-// 	return builder.finish();
-// }
-
 function flattenTreeToCompletions(
 	node: DbTreeNode, profileId: string, profileName: string,
 	plugin: VaultCryptPlugin, out: Completion[],
@@ -192,7 +117,7 @@ function vcCompletionSource(plugin: VaultCryptPlugin) {
 		for (const profile of unlockedProfiles) {
 			const tree = plugin.sessionService.getEntryTree(profile.id);
 			if (!tree) continue;
-			const profileOptions: Completion[] = [];
+			const profileOptions:Completion[] = [];
 			flattenTreeToCompletions(tree, profile.id, profile.name, plugin, profileOptions);
 			options.push(...profileOptions.filter(o => o.label.startsWith(before.text)));
 		}
@@ -233,7 +158,7 @@ export function buildEditorExtension(plugin: VaultCryptPlugin): Extension {
 				}
 			}
 		},
-		{ decorations: v => v.decorations },
+		{decorations: v => v.decorations},
 	);
 
 	const copyHandler = EditorView.domEventHandlers({

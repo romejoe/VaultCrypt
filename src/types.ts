@@ -1,4 +1,3 @@
-import { WorkspaceLeaf } from 'obsidian';
 import { KdbxVersion } from './kdbx-service';
 
 export interface VaultCryptProfile {
@@ -16,8 +15,4 @@ export interface VaultCryptState {
 	profiles: VaultCryptProfile[];
 	currentProfile: VaultCryptProfile | null;
 	isLocked: boolean;
-}
-
-export interface WorkspaceLeafRebuild extends WorkspaceLeaf {
-	rebuildView(): void;
 }
