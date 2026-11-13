@@ -1,5 +1,5 @@
 import {App} from 'obsidian';
-import {getVaultFile} from './utils';
+import {readKdbxFile, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 import {signal} from '@maverick-js/signals';
@@ -59,9 +59,7 @@ export class UnlockSessionService {
 		if (this.openDbs.has(profileId)) {
 			this.lockProfile(profileId);
 		}
-		const file = getVaultFile(this.app, config.path);
-		if (!file) throw new Error(`KDBX file not found: ${config.path}`);
-		const buffer = await this.app.vault.readBinary(file);
+		const buffer = await readKdbxFile(this.app, config.path);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
@@ -77,9 +75,7 @@ export class UnlockSessionService {
 	 * Throws on I/O errors or a corrupted database.
 	 */
 	async checkProfilePassword(config: ProfileConfig, password: string): Promise<boolean> {
-		const file = getVaultFile(this.app, config.path);
-		if (!file) throw new Error(`KDBX file not found: ${config.path}`);
-		const buffer = await this.app.vault.readBinary(file);
+		const buffer = await readKdbxFile(this.app, config.path);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
@@ -476,12 +472,7 @@ export class UnlockSessionService {
 	}
 
 	private async saveKdbx(path: string, buffer: ArrayBuffer): Promise<void> {
-		const existing = getVaultFile(this.app, path);
-		if (existing) {
-			await this.app.vault.modifyBinary(existing, buffer);
-		} else {
-			await this.app.vault.createBinary(path, buffer);
-		}
+		await writeKdbxFile(this.app, path, buffer);
 	}
 
 	private resolveEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry | null {
