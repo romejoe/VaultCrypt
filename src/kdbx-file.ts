@@ -9,6 +9,23 @@ export class KdbxFileError extends Error {
 	}
 }
 
+// Service instances share a reservation, while independent vaults stay isolated.
+const pendingCreations = new WeakMap<App['vault'], Set<string>>();
+
+/** Reserve synchronously before any await; the caller must release in finally. */
+export function reserveKdbxCreation(app: App, path: string): () => void {
+	let paths = pendingCreations.get(app.vault);
+	if (!paths) {
+		paths = new Set();
+		pendingCreations.set(app.vault, paths);
+	}
+	if (paths.has(path)) {
+		throw new KdbxFileError(`KDBX file is already being created: ${path}`);
+	}
+	paths.add(path);
+	return () => { paths.delete(path); };
+}
+
 /** Hidden files are not in Obsidian's vault index; access them through the adapter. */
 export async function readKdbxFile(app: App, path: string): Promise<ArrayBuffer> {
 	try {

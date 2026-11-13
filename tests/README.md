@@ -20,6 +20,11 @@ visible unindexed, and indexed locations. Regression checks preserve existing
 bytes and profile settings on failure, reject unreadable destinations, and verify
 that new databases can still be created and reopened. The test suites share an
 in-memory bundling and Obsidian host helper in `tests/helpers/obsidian-runtime.mjs`.
+Concurrent-creation checks pause storage operations to verify that a second
+service cannot create the same path while the first is pending. Reservations
+are released after success and storage failures; different paths and separate
+vaults remain independent. These reservations coordinate this plugin's service
+instances, not other apps or processes writing into the vault.
 
 Directory migration tests cover hidden-to-visible and visible-to-hidden moves,
 nested attachments and keyrings, path updates, destination collisions, and rollback
