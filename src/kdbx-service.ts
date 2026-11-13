@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import {readKdbxFile, writeKdbxFile} from './kdbx-file';
+import {KdbxFileError, readKdbxFile, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import { Int64 } from "kdbxweb";
 import { argon2d, argon2id } from '@noble/hashes/argon2.js';
@@ -61,6 +61,12 @@ export class KdbxService {
 		version: KdbxVersion = 4,
 		kdfConfig?: KdfConfig
 	): Promise<void> {
+		// Creation must not reuse the overwrite behavior needed by normal saves.
+		// Check disk directly because hidden files are absent from the vault index.
+		if (await this.app.vault.adapter.stat(path)) {
+			throw new KdbxFileError(`Cannot create KDBX file: path already exists: ${path}`);
+		}
+
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
