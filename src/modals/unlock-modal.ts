@@ -1,5 +1,6 @@
 import {App, ButtonComponent, Modal, Notice, Setting, ToggleComponent} from 'obsidian';
 import VaultCryptPlugin from '../main';
+import {KdbxFileError} from '../kdbx-file';
 
 export class UnlockModal extends Modal {
 	private plugin: VaultCryptPlugin;
@@ -238,7 +239,7 @@ export class UnlockModal extends Modal {
 					);
 				} catch (e) {
 					console.error(e);
-					this.showError("Incorrect keyring master password or corrupted keyring.");
+					this.showError(e instanceof KdbxFileError ? e.message : "Incorrect keyring master password or corrupted keyring.");
 					return;
 				}
 				const profilePassword = passwords.get(profileId);
@@ -250,7 +251,7 @@ export class UnlockModal extends Modal {
 					await this.plugin.sessionService.unlockProfile(profileId, config, profilePassword);
 				} catch (e) {
 					console.error(e);
-					this.showError("Stored profile password is incorrect or corrupted.");
+					this.showError(e instanceof KdbxFileError ? e.message : "Stored profile password is incorrect or corrupted.");
 					return;
 				}
 				// Save or forget the keyring password based on the remember toggle
@@ -270,7 +271,7 @@ export class UnlockModal extends Modal {
 			this.onDone?.(profileId);
 		} catch (e) {
 			console.error(e);
-			this.showError("Incorrect password or corrupted database.");
+			this.showError(e instanceof KdbxFileError ? e.message : "Incorrect password or corrupted database.");
 		} finally {
 			this.isSubmitting = false;
 			this.clearProgressTimer();

@@ -1,40 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {build} from 'esbuild';
+import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-// Bundle the real service in memory: Obsidian supplies these classes at runtime,
-// but its npm package only supplies types. No vault files or build artifacts are used.
-const {outputFiles} = await build({
-	stdin: {
-		contents: `
-			export {ProfileService} from './src/profile-service.ts';
-			export {signal} from '@maverick-js/signals';
-			export {TFile, TFolder, Notice} from 'obsidian';
-		`,
-		resolveDir: process.cwd(),
-	},
-	bundle: true,
-	write: false,
-	format: 'esm',
-	platform: 'node',
-	plugins: [{
-		name: 'obsidian-test-runtime',
-		setup(builder) {
-			builder.onResolve({filter: /^obsidian$/}, () => ({path: 'obsidian', namespace: 'test'}));
-			builder.onLoad({filter: /.*/, namespace: 'test'}, () => ({contents: `
-				export class TFile {}
-				export class TFolder {}
-				export class Notice {
-					static messages = [];
-					constructor(message) { Notice.messages.push(message); }
-				}
-			`}));
-		},
-	}],
-});
-const {ProfileService, signal, TFile, TFolder, Notice} = await import(
-	`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
-);
+const {ProfileService, signal, TFile, TFolder, Notice} = await loadObsidianRuntime(`
+	export {ProfileService} from './src/profile-service.ts';
+	export {signal} from '@maverick-js/signals';
+	export {TFile, TFolder, Notice} from 'obsidian';
+`);
 
 function fixture(t, {path = '_VaultCrypt', indexed = {}, disk = {}, create, stat} = {}) {
 	t.mock.method(console, 'error', () => {});
@@ -135,4 +107,217 @@ test('initial disk inspection errors propagate without attempting creation', asy
 	const {service, created} = fixture(t, {stat() { throw original; }});
 	await assert.rejects(service.ensureVaultCryptDir(), error => error === original);
 	assert.deepEqual(created, []);
+});
+
+function migrationFixture(t, {oldDir = '.vaultcrypt', indexed = false, failRename, beforeCleanup, failCleanup} = {}) {
+	t.mock.method(console, 'warn', () => {});
+	Notice.messages.length = 0;
+	const disk = new Map([
+		[oldDir, 'folder'],
+		[`${oldDir}/whee.kdbx`, 'profile bytes'],
+		[`${oldDir}/_keyring.kdbx`, 'keyring bytes'],
+		[`${oldDir}/attachments`, 'folder'],
+		[`${oldDir}/attachments/test.bin`, 'attachment bytes'],
+	]);
+	const index = new Map();
+	const calls = [];
+	const renames = [];
+	function putInIndex(path) {
+		if (!indexed || path.split('/').some(segment => segment.startsWith('.'))) return;
+		const file = disk.get(path) === 'folder' ? new TFolder() : new TFile();
+		file.path = path;
+		index.set(path, file);
+	}
+	for (const path of disk.keys()) putInIndex(path);
+	function list(path) {
+		if (!disk.has(path)) throw new Error(`Directory not found: ${path}`);
+		const children = [...disk.keys()].filter(key => key.startsWith(`${path}/`) && !key.slice(path.length + 1).includes('/'));
+		return {files: children.filter(key => disk.get(key) !== 'folder'), folders: children.filter(key => disk.get(key) === 'folder')};
+	}
+	function rename(from, to, api) {
+		renames.push({from, to, api});
+		if (failRename) failRename(from, to, disk);
+		if (!disk.has(from)) throw new Error(`File not found: ${from}`);
+		// Deliberately allow replacement to catch missing collision checks.
+		disk.set(to, disk.get(from));
+		disk.delete(from);
+		index.delete(from);
+		putInIndex(to);
+	}
+	const app = {vault: {
+		getAbstractFileByPath: path => index.get(path) ?? null,
+		adapter: {
+			async stat(path) { return disk.has(path) ? {type: disk.get(path) === 'folder' ? 'folder' : 'file'} : null; },
+			async list(path) {
+				if (beforeCleanup && renames.length >= 3) beforeCleanup(path, disk);
+				return list(path);
+			},
+			async rename(from, to) { rename(from, to, 'adapter'); },
+			async rmdir() {
+				// Desktop adapters can delegate to fs.rm, which rejects directories
+				// with recursive=false even when they are empty.
+				throw Object.assign(new Error('Path is a directory'), {code: 'ERR_FS_EISDIR'});
+			},
+			async trashLocal(path) {
+				if (failCleanup) failCleanup(path);
+				assert.deepEqual(list(path), {files: [], folders: []});
+				calls.push(['trashLocal', path]);
+				disk.delete(path);
+			},
+		},
+		async createFolder(path) {
+			if (disk.has(path)) throw new Error('Folder already exists');
+			disk.set(path, 'folder');
+			putInIndex(path);
+		},
+		async rename(file, to) { rename(file.path, to, 'vault'); },
+	}, fileManager: {
+		async trashFile(folder) {
+			assert.deepEqual(list(folder.path), {files: [], folders: []});
+			calls.push(['trash', folder.path]);
+			disk.delete(folder.path);
+			index.delete(folder.path);
+		},
+	}};
+	const settings = {
+		general: {vaultCryptDir: oldDir},
+		profiles: {whee: {path: `${oldDir}/whee.kdbx`}, external: {path: 'other/external.kdbx'}},
+		masterKeyringPath: `${oldDir}/_keyring.kdbx`,
+	};
+	const state = {profiles: [{id: 'whee', path: `${oldDir}/whee.kdbx`}], currentProfile: {id: 'whee', path: `${oldDir}/whee.kdbx`}};
+	const remaps = [];
+	const service = new ProfileService(signal(settings), app, {
+		remapPathPrefix(from, to) { remaps.push([from, to]); },
+	}, signal(state), patch => patch(settings), mutate => mutate(state));
+	return {service, disk, settings, state, remaps, renames, calls};
+}
+
+for (const [oldDir, newDir, indexed, api] of [
+	['.vaultcrypt', 'VaultCrypt', false, 'adapter'],
+	['VaultCrypt', '.vaultcrypt', true, 'vault'],
+	['VaultCrypt', 'private/secrets', true, 'vault'],
+	['VaultCrypt', 'Secrets', false, 'adapter'],
+]) {
+	test(`move ${oldDir} to ${newDir}, indexed=${indexed}`, async t => {
+		const {service, disk, settings, state, remaps, renames} = migrationFixture(t, {oldDir, indexed});
+		await service.moveVaultDir(newDir);
+		assert.equal(disk.get(`${newDir}/whee.kdbx`), 'profile bytes');
+		assert.equal(disk.get(`${newDir}/_keyring.kdbx`), 'keyring bytes');
+		assert.equal(disk.get(`${newDir}/attachments/test.bin`), 'attachment bytes');
+		assert.equal([...disk.keys()].some(path => path === oldDir || path.startsWith(`${oldDir}/`)), false);
+		assert.equal(settings.general.vaultCryptDir, newDir);
+		assert.equal(settings.profiles.whee.path, `${newDir}/whee.kdbx`);
+		assert.equal(settings.profiles.external.path, 'other/external.kdbx');
+		assert.equal(settings.masterKeyringPath, `${newDir}/_keyring.kdbx`);
+		assert.equal(state.profiles[0].path, `${newDir}/whee.kdbx`);
+		assert.equal(state.currentProfile.path, `${newDir}/whee.kdbx`);
+		assert.deepEqual(remaps, [[oldDir, newDir]]);
+		assert.ok(renames.every(rename => rename.api === api));
+	});
+}
+
+test('a failed move rolls back unindexed destination files and preserves settings', async t => {
+	const {service, disk, settings, state, remaps, renames} = migrationFixture(t, {
+		failRename(from) { if (from === '.vaultcrypt/attachments/test.bin') throw new Error('Move denied'); },
+	});
+	await assert.rejects(service.moveVaultDir('VaultCrypt'), /Move denied/);
+	assert.equal(disk.get('.vaultcrypt/whee.kdbx'), 'profile bytes');
+	assert.equal(disk.get('.vaultcrypt/_keyring.kdbx'), 'keyring bytes');
+	assert.equal(disk.get('.vaultcrypt/attachments/test.bin'), 'attachment bytes');
+	assert.equal(disk.has('VaultCrypt/whee.kdbx'), false);
+	assert.equal(disk.has('VaultCrypt/_keyring.kdbx'), false);
+	assert.equal(settings.general.vaultCryptDir, '.vaultcrypt');
+	assert.equal(settings.profiles.whee.path, '.vaultcrypt/whee.kdbx');
+	assert.equal(settings.masterKeyringPath, '.vaultcrypt/_keyring.kdbx');
+	assert.equal(state.currentProfile.path, '.vaultcrypt/whee.kdbx');
+	assert.deepEqual(remaps, []);
+	assert.deepEqual(renames.slice(-2).map(rename => rename.from), ['VaultCrypt/_keyring.kdbx', 'VaultCrypt/whee.kdbx']);
+});
+
+for (const collision of ['file', 'folder']) {
+	test(`a destination ${collision} is preserved and earlier moves are rolled back`, async t => {
+		const {service, disk, settings} = migrationFixture(t);
+		disk.set('VaultCrypt', 'folder');
+		disk.set('VaultCrypt/_keyring.kdbx', collision === 'folder' ? 'folder' : 'existing destination bytes');
+		await assert.rejects(service.moveVaultDir('VaultCrypt'), /already exists/);
+		assert.equal(disk.get('VaultCrypt/_keyring.kdbx'), collision === 'folder' ? 'folder' : 'existing destination bytes');
+		assert.equal(disk.get('.vaultcrypt/whee.kdbx'), 'profile bytes');
+		assert.equal(disk.get('.vaultcrypt/_keyring.kdbx'), 'keyring bytes');
+		assert.equal(settings.general.vaultCryptDir, '.vaultcrypt');
+	});
+}
+
+test('cleanup preserves files created in the source directory during migration', async t => {
+	const {service, disk} = migrationFixture(t, {
+		beforeCleanup(path, disk) {
+			if (path === '.vaultcrypt') disk.set('.vaultcrypt/new.kdbx', 'new bytes');
+		},
+	});
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal(disk.get('.vaultcrypt/new.kdbx'), 'new bytes');
+	assert.equal(disk.get('VaultCrypt/whee.kdbx'), 'profile bytes');
+});
+
+test('rollback uses the adapter when an indexed file was moved into a hidden folder', async t => {
+	const {service, disk, settings, renames} = migrationFixture(t, {
+		oldDir: 'VaultCrypt', indexed: true,
+		failRename(from) { if (from === 'VaultCrypt/attachments/test.bin') throw new Error('Move denied'); },
+	});
+	await assert.rejects(service.moveVaultDir('.vaultcrypt'), /Move denied/);
+	assert.equal(disk.get('VaultCrypt/whee.kdbx'), 'profile bytes');
+	assert.equal(disk.get('VaultCrypt/_keyring.kdbx'), 'keyring bytes');
+	assert.equal(settings.general.vaultCryptDir, 'VaultCrypt');
+	assert.ok(renames.slice(-2).every(rename => rename.api === 'adapter'));
+});
+
+test('rollback reports files it cannot restore and preserves conflicting files', async t => {
+	const {service, disk, settings} = migrationFixture(t, {
+		failRename(from, to, disk) {
+			if (from === '.vaultcrypt/attachments/test.bin') {
+				disk.set('.vaultcrypt/whee.kdbx', 'concurrently created bytes');
+				throw new Error('Move denied');
+			}
+		},
+	});
+	await assert.rejects(service.moveVaultDir('VaultCrypt'), /Move denied/);
+	assert.equal(disk.get('.vaultcrypt/whee.kdbx'), 'concurrently created bytes');
+	assert.equal(disk.get('VaultCrypt/whee.kdbx'), 'profile bytes');
+	assert.equal(disk.get('.vaultcrypt/_keyring.kdbx'), 'keyring bytes');
+	assert.equal(settings.general.vaultCryptDir, '.vaultcrypt');
+	assert.match(Notice.messages.at(-1), /Could not restore these files: VaultCrypt\/whee.kdbx/);
+});
+
+test('unindexed empty source directories are trashed deepest first', async t => {
+	const {service, disk, calls} = migrationFixture(t);
+	disk.set('.vaultcrypt/empty', 'folder');
+	disk.set('.vaultcrypt/empty/nested', 'folder');
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal([...disk.keys()].some(path => path.startsWith('.vaultcrypt')), false);
+	assert.deepEqual(calls, [
+		['trashLocal', '.vaultcrypt/empty/nested'],
+		['trashLocal', '.vaultcrypt/empty'],
+		['trashLocal', '.vaultcrypt/attachments'],
+		['trashLocal', '.vaultcrypt'],
+	]);
+});
+
+test('an entirely empty unindexed source directory is removed', async t => {
+	const {service, disk, calls, settings} = migrationFixture(t);
+	for (const path of [...disk.keys()]) if (path !== '.vaultcrypt') disk.delete(path);
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal(disk.has('.vaultcrypt'), false);
+	assert.equal(settings.general.vaultCryptDir, 'VaultCrypt');
+	assert.deepEqual(calls, [['trashLocal', '.vaultcrypt']]);
+});
+
+test('cleanup failures are reported while keeping migrated paths and files', async t => {
+	const {service, disk, settings} = migrationFixture(t, {
+		failCleanup() { throw new Error('Trash denied'); },
+	});
+	await service.moveVaultDir('VaultCrypt');
+	assert.equal(disk.get('VaultCrypt/whee.kdbx'), 'profile bytes');
+	assert.equal(settings.profiles.whee.path, 'VaultCrypt/whee.kdbx');
+	assert.equal(disk.has('.vaultcrypt/attachments'), true);
+	assert.match(Notice.messages.at(-1), /could not remove empty folders: .vaultcrypt\/attachments/);
+	assert.equal(console.warn.mock.calls.length, 1);
 });

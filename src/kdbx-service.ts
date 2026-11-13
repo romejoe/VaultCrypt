@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { getVaultFile } from './utils';
+import {KdbxFileError, readKdbxFile, reserveKdbxCreation, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import { Int64 } from "kdbxweb";
 import { argon2d, argon2id } from '@noble/hashes/argon2.js';
@@ -61,42 +61,51 @@ export class KdbxService {
 		version: KdbxVersion = 4,
 		kdfConfig?: KdfConfig
 	): Promise<void> {
-		const credentials = new kdbxweb.KdbxCredentials(
-			kdbxweb.ProtectedValue.fromString(password)
-		);
-		const name = path.split('/').pop()?.replace(/\.kdbx$/i, '') ?? 'VaultCrypt';
-		const db = kdbxweb.Kdbx.create(credentials, name);
-
-		if (version === 3) {
-			db.setVersion(3);
-			const cfg = { ...DEFAULT_KDF_V3, ...kdfConfig };
-			db.setKdf(kdbxweb.Consts.KdfId.Aes);
-			db.header.kdfParameters?.set('R', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
-		} else {
-			db.setVersion(4);
-			const cfg = { ...DEFAULT_KDF_V4, ...kdfConfig };
-			db.setKdf(kdbxweb.Consts.KdfId.Argon2id);
-			const kdfParams = db.header.kdfParameters;
-			if (kdfParams) {
-				kdfParams.set('I', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
-				kdfParams.set('M', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.memory * 1024));
-				kdfParams.set('P', kdbxweb.VarDictionary.ValueType.UInt32, cfg.parallelism);
+		const release = reserveKdbxCreation(this.app, path);
+		try {
+			// Creation must not reuse the overwrite behavior needed by normal saves.
+			// Check disk directly because hidden files are absent from the vault index.
+			if (await this.app.vault.adapter.stat(path)) {
+				throw new KdbxFileError(`Cannot create KDBX file: path already exists: ${path}`);
 			}
-		}
-		
-		this.db = db;
-		this.currentPath = path;
 
-		await this.saveDatabase(path);
+			const credentials = new kdbxweb.KdbxCredentials(
+				kdbxweb.ProtectedValue.fromString(password)
+			);
+			const name = path.split('/').pop()?.replace(/\.kdbx$/i, '') ?? 'VaultCrypt';
+			const db = kdbxweb.Kdbx.create(credentials, name);
+
+			if (version === 3) {
+				db.setVersion(3);
+				const cfg = { ...DEFAULT_KDF_V3, ...kdfConfig };
+				db.setKdf(kdbxweb.Consts.KdfId.Aes);
+				db.header.kdfParameters?.set('R', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
+			} else {
+				db.setVersion(4);
+				const cfg = { ...DEFAULT_KDF_V4, ...kdfConfig };
+				db.setKdf(kdbxweb.Consts.KdfId.Argon2id);
+				const kdfParams = db.header.kdfParameters;
+				if (kdfParams) {
+					kdfParams.set('I', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.iterations));
+					kdfParams.set('M', kdbxweb.VarDictionary.ValueType.UInt64, Int64.from(cfg.memory * 1024));
+					kdfParams.set('P', kdbxweb.VarDictionary.ValueType.UInt32, cfg.parallelism);
+				}
+			}
+
+			this.db = db;
+			this.currentPath = path;
+
+			await this.saveDatabase(path);
+		} finally {
+			release();
+		}
 	}
 
 	async openDatabase(path: string, password: string): Promise<void> {
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
-		const file = getVaultFile(this.app, path);
-		if (!file) throw new Error(`KDBX file not found: ${path}`);
-		const buffer = await this.app.vault.readBinary(file);
+		const buffer = await readKdbxFile(this.app, path);
 		this.db = await kdbxweb.Kdbx.load(buffer, credentials);
 		this.currentPath = path;
 	}
@@ -106,12 +115,7 @@ export class KdbxService {
 		const savePath = path ?? this.currentPath;
 		if (!savePath) throw new Error('No path specified and no current path');
 		const buffer = await this.db.save();
-		const existing = getVaultFile(this.app, savePath);
-		if (existing) {
-			await this.app.vault.modifyBinary(existing, buffer);
-		} else {
-			await this.app.vault.createBinary(savePath, buffer);
-		}
+		await writeKdbxFile(this.app, savePath, buffer);
 		this.currentPath = savePath;
 	}
 
