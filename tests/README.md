@@ -15,6 +15,12 @@ Both hidden and visible unindexed paths are checked, alongside indexed files.
 Missing files, adapter failures, folder collisions, and unlock-modal error messages
 are also covered. Production KDF defaults are unchanged.
 
+Profile and keyring creation reject existing files and folders in hidden,
+visible unindexed, and indexed locations. Regression checks preserve existing
+bytes and profile settings on failure, reject unreadable destinations, and verify
+that new databases can still be created and reopened. The test suites share an
+in-memory bundling and Obsidian host helper in `tests/helpers/obsidian-runtime.mjs`.
+
 Directory migration tests cover hidden-to-visible and visible-to-hidden moves,
 nested attachments and keyrings, path updates, destination collisions, and rollback
 when moved files are not indexed yet. They also verify that cleanup preserves
@@ -43,6 +49,10 @@ Do not use a production vault for file-collision or missing-directory checks.
   With Obsidian closed, temporarily move a test database out of the vault. Restart
   and try unlocking it; confirm the error names the missing KDBX path. Restore it
   afterward. Repeat for a missing keyring and a missing keyring-managed profile.
+- Place a test KDBX file at a profile destination that is absent from settings,
+  then try creating that profile. Confirm the error names the existing path and
+  the original file is unchanged. Repeat with a keyring destination while keyring
+  setup is disabled, and with hidden and visible storage directories.
 - Use **Change storage directory** with **Move existing files** enabled to move
   from `.vaultcrypt` to `VaultCrypt` and back. Include profiles, a keyring, and a
   nested attachment folder. Confirm the files and configured paths move together,

@@ -1,40 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {build} from 'esbuild';
+import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-// Bundle the real service in memory: Obsidian supplies these classes at runtime,
-// but its npm package only supplies types. No vault files or build artifacts are used.
-const {outputFiles} = await build({
-	stdin: {
-		contents: `
-			export {ProfileService} from './src/profile-service.ts';
-			export {signal} from '@maverick-js/signals';
-			export {TFile, TFolder, Notice} from 'obsidian';
-		`,
-		resolveDir: process.cwd(),
-	},
-	bundle: true,
-	write: false,
-	format: 'esm',
-	platform: 'node',
-	plugins: [{
-		name: 'obsidian-test-runtime',
-		setup(builder) {
-			builder.onResolve({filter: /^obsidian$/}, () => ({path: 'obsidian', namespace: 'test'}));
-			builder.onLoad({filter: /.*/, namespace: 'test'}, () => ({contents: `
-				export class TFile {}
-				export class TFolder {}
-				export class Notice {
-					static messages = [];
-					constructor(message) { Notice.messages.push(message); }
-				}
-			`}));
-		},
-	}],
-});
-const {ProfileService, signal, TFile, TFolder, Notice} = await import(
-	`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
-);
+const {ProfileService, signal, TFile, TFolder, Notice} = await loadObsidianRuntime(`
+	export {ProfileService} from './src/profile-service.ts';
+	export {signal} from '@maverick-js/signals';
+	export {TFile, TFolder, Notice} from 'obsidian';
+`);
 
 function fixture(t, {path = '_VaultCrypt', indexed = {}, disk = {}, create, stat} = {}) {
 	t.mock.method(console, 'error', () => {});

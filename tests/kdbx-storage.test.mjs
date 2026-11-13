@@ -1,52 +1,31 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createRequire} from 'node:module';
-import {build} from 'esbuild';
+import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
 // Real KDBX encryption and service code, with only the Obsidian host mocked.
-const {outputFiles} = await build({
-	stdin: {
-		contents: `
-			export {KdbxService} from './src/kdbx-service.ts';
-			export {UnlockSessionService} from './src/unlock-session.ts';
-			export {UnlockModal} from './src/modals/unlock-modal.ts';
-			export {KdbxFileError, readKdbxFile, writeKdbxFile} from './src/kdbx-file.ts';
-			export {TFile} from 'obsidian';
-		`,
-		resolveDir: process.cwd(),
-	},
-	bundle: true,
-	write: false,
-	format: 'cjs',
-	platform: 'node',
-	plugins: [{
-		name: 'obsidian-test-runtime',
-		setup(builder) {
-			builder.onResolve({filter: /^obsidian$/}, () => ({path: 'obsidian', namespace: 'test'}));
-			builder.onLoad({filter: /.*/, namespace: 'test'}, () => ({contents: `
-				export class TFile { constructor(path) { this.path = path; } }
-				export class TFolder {}
-				export class Modal { constructor(app) { this.app = app; } }
-				export class Notice {}
-				export class Setting {}
-			`}));
-		},
-	}],
-});
-const module = {exports: {}};
-new Function('require', 'module', 'exports', outputFiles[0].text)(
-	createRequire(import.meta.url), module, module.exports,
-);
-const {KdbxService, UnlockSessionService, UnlockModal, KdbxFileError, readKdbxFile, writeKdbxFile, TFile} = module.exports;
+const {KdbxService, ProfileService, KeyringService, signal, UnlockSessionService, UnlockModal, KdbxFileError, readKdbxFile, writeKdbxFile, TFile, TFolder} = await loadObsidianRuntime(`
+	export {KdbxService} from './src/kdbx-service.ts';
+	export {ProfileService} from './src/profile-service.ts';
+	export {KeyringService} from './src/keyring-service.ts';
+	export {signal} from '@maverick-js/signals';
+	export {UnlockSessionService} from './src/unlock-session.ts';
+	export {UnlockModal} from './src/modals/unlock-modal.ts';
+	export {KdbxFileError, readKdbxFile, writeKdbxFile} from './src/kdbx-file.ts';
+	export {TFile, TFolder} from 'obsidian';
+`);
 
 function fixture({indexed = false} = {}) {
 	const disk = new Map();
 	const index = new Map();
+	const folders = new Set();
 	const calls = [];
 	const app = {vault: {
 		getAbstractFileByPath: path => index.get(path) ?? null,
 		adapter: {
-			async stat(path) { return disk.has(path) ? {type: 'file'} : null; },
+			async stat(path) {
+				if (folders.has(path)) return {type: 'folder'};
+				return disk.has(path) ? {type: 'file'} : null;
+			},
 			async readBinary(path) {
 				calls.push('adapter.read');
 				if (!disk.has(path)) throw new Error('ENOENT');
@@ -66,7 +45,72 @@ function fixture({indexed = false} = {}) {
 			if (indexed) index.set(path, new TFile(path));
 		},
 	}};
-	return {app, disk, index, calls};
+	return {app, disk, index, folders, calls};
+}
+
+function creationFixture(t, kind, path, indexed) {
+	const storage = fixture({indexed});
+	const settings = {general: {vaultCryptDir: path.slice(0, path.lastIndexOf('/'))}, profiles: {}};
+	const database = new KdbxService(storage.app);
+	const profiles = new ProfileService(signal(settings), storage.app, database, signal({}), patch => patch(settings), () => {});
+	const originalCreate = KdbxService.prototype.createDatabase;
+	// Exercise the real creation code with inexpensive test-only encryption.
+	t.mock.method(KdbxService.prototype, 'createDatabase', function(path, password, version) {
+		return originalCreate.call(this, path, password, version, {iterations: 2, memory: 32, parallelism: 1});
+	});
+	const create = password => kind === 'profile'
+		? profiles.addProfile('whee', password, 4)
+		: new KeyringService(storage.app).createKeyring(path, password);
+	return {...storage, settings, create};
+}
+
+const creationLocations = [
+	['.vaultcrypt/whee.kdbx', false],
+	['private/.secrets/whee.kdbx', false],
+	['VaultCrypt/whee.kdbx', false],
+	['VaultCrypt/whee.kdbx', true],
+];
+
+for (const kind of ['profile', 'keyring']) {
+	for (const [path, indexed] of creationLocations) {
+		for (const collision of ['file', 'folder']) {
+			test(`${kind} creation preserves an existing ${collision}: ${path}, indexed=${indexed}`, async t => {
+				const {disk, index, folders, calls, settings, create} = creationFixture(t, kind, path, indexed);
+				const original = new Uint8Array([1, 2, 3, 4]).buffer;
+				if (collision === 'folder') folders.add(path);
+				else disk.set(path, original.slice(0));
+				if (indexed) index.set(path, collision === 'folder' ? new TFolder() : new TFile(path));
+				await assert.rejects(create('new password'), error => /already exists/.test(error.message) && error.message.includes(path));
+				if (collision === 'file') assert.deepEqual(disk.get(path), original);
+				else assert.equal(folders.has(path) && !disk.has(path), true);
+				assert.deepEqual(calls, []);
+				assert.deepEqual(settings.profiles, {});
+			});
+		}
+
+		test(`${kind} creation succeeds at an unused path: ${path}, indexed=${indexed}`, async t => {
+			const {app, settings, create} = creationFixture(t, kind, path, indexed);
+			await create('new password');
+			const reopened = new KdbxService(app);
+			await reopened.openDatabase(path, 'new password');
+			assert.deepEqual(reopened.listEntries(), []);
+			reopened.closeDatabase();
+			if (kind === 'profile') assert.equal(settings.profiles.whee.path, path);
+		});
+	}
+
+	test(`${kind} creation fails safely when the destination cannot be checked`, async t => {
+		const path = '.vaultcrypt/whee.kdbx';
+		const {app, disk, calls, settings, create} = creationFixture(t, kind, path, false);
+		const original = new Uint8Array([1, 2, 3, 4]).buffer;
+		disk.set(path, original.slice(0));
+		const error = new Error('Disk unavailable');
+		t.mock.method(app.vault.adapter, 'stat', async () => { throw error; });
+		await assert.rejects(create('new password'), failure => failure === error);
+		assert.deepEqual(disk.get(path), original);
+		assert.deepEqual(calls, []);
+		assert.deepEqual(settings.profiles, {});
+	});
 }
 
 for (const version of [3, 4]) {
