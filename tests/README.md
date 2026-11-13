@@ -19,6 +19,8 @@ edits with a failed save, later persistence of the successful value, entry and
 attachment changes, independent profiles, and queued requests whose session was
 locked or replaced. Failed entry creation locks the profile so queued saves
 cannot persist the rejected entry or its new groups.
+Deferred save and write failures also verify that an old save cannot lock a
+replacement session or reject edits queued for that replacement.
 
 The hidden-database cases reproduce [issue #85](https://github.com/romejoe/VaultCrypt/issues/85).
 They use real KDBX v3/v4 encryption with reduced test-only KDF parameters and cover

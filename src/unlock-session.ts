@@ -186,7 +186,7 @@ export class UnlockSessionService {
 			} catch (err) {
 				if (!existingEntry) {
 					// Reload from disk to discard the new entry and any new groups.
-					this.lockProfile(profileId);
+					this.lockIfCurrent(profileId, db);
 				} else if (previousValue === undefined) {
 					entry.fields.delete(fieldName);
 				} else {
@@ -302,7 +302,7 @@ export class UnlockSessionService {
 			} catch (err) {
 				// A delete cannot be trivially rolled back in kdbxweb, so lock the
 				// profile to force a clean reload from disk on next unlock.
-				this.lockProfile(profileId);
+				this.lockIfCurrent(profileId, db);
 				throw err;
 			}
 			this.fieldRevision$.set(revision => revision + 1);
@@ -430,7 +430,7 @@ export class UnlockSessionService {
 				await this.saveKdbx(kdbxFilePath, buffer);
 			} catch (err) {
 				// Cannot trivially roll back; lock to force a clean reload from disk.
-				this.lockProfile(profileId);
+				this.lockIfCurrent(profileId, db);
 				throw err;
 			}
 		});
@@ -477,7 +477,7 @@ export class UnlockSessionService {
 				const buffer = await db.save();
 				await this.saveKdbx(kdbxFilePath, buffer);
 			} catch (err) {
-				this.lockProfile(profileId);
+				this.lockIfCurrent(profileId, db);
 				throw err;
 			}
 			this.fieldRevision$.set(revision => revision + 1);
@@ -492,6 +492,11 @@ export class UnlockSessionService {
 	/** Register a callback to be called when any profile is unlocked. */
 	onUnlock(cb: UnlockCallback): void {
 		this.unlockCallbacks.push(cb);
+	}
+
+	/** Save failures must not lock a session opened after that save began. */
+	private lockIfCurrent(profileId: string, db: kdbxweb.Kdbx): void {
+		if (this.getDatabase(profileId) === db) this.lockProfile(profileId);
 	}
 
 	private async mutateProfile(profileId: string, mutation: (db: kdbxweb.Kdbx) => Promise<void>): Promise<void> {

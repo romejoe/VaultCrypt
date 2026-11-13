@@ -140,6 +140,63 @@ for (const name of ['create', 'delete']) {
 	});
 }
 
+const lockingMutations = {
+	newFieldEntry: service => service.setFieldValue('test', 'NewGroup/NewEntry', 'Password', 'new', 'test.kdbx'),
+	delete: mutations.delete,
+	deleteAttachment: mutations.deleteAttachment,
+	create: mutations.create,
+};
+
+for (const [name, mutate] of Object.entries(lockingMutations)) {
+	for (const failure of ['save', 'write']) {
+		test(`a stale ${name} ${failure} failure preserves the replacement session and its queued edits`, async t => {
+			const {service, databases, persisted, setWrite} = await fixture(t);
+			await service.setAttachment('test', 'Entry', 'old.txt', new ArrayBuffer(1), 'test.kdbx');
+			const pending = deferred();
+			const started = deferred();
+			if (failure === 'save') {
+				t.mock.method(databases.get('test.kdbx'), 'save', async () => {
+					started.resolve();
+					await pending.promise;
+				});
+			}
+			let firstWrite = true;
+			setWrite(async (path, buffer) => {
+				if (failure === 'write' && firstWrite) {
+					firstWrite = false;
+					started.resolve();
+					await pending.promise;
+				}
+				persisted.set(path, JSON.parse(new TextDecoder().decode(buffer)));
+			});
+			const oldSave = mutate(service);
+			await started.promise;
+			const locks = [];
+			service.onLock(id => locks.push(id));
+			service.lockProfile('test');
+			const replacement = kdbxweb.Kdbx.create(new kdbxweb.KdbxCredentials(kdbxweb.ProtectedValue.fromString('test')), 'replacement');
+			const entry = replacement.createEntry(replacement.getDefaultGroup());
+			entry.fields.set('Title', 'Entry');
+			entry.fields.set('Password', kdbxweb.ProtectedValue.fromString('reopened'));
+			databases.set('test.kdbx', replacement);
+			t.mock.method(replacement, 'save', async () => new TextEncoder().encode(JSON.stringify({
+				fields: service.getEntryFields('test', 'Entry'),
+			})).buffer);
+			await service.unlockProfile('test', {path: 'test.kdbx', autoLockMinutes: 0}, 'test');
+			const replacementSave = service.setFieldValue('test', 'Entry', 'Password', 'saved in replacement', 'test.kdbx');
+			const completed = Promise.allSettled([oldSave, replacementSave]);
+			pending.reject(new Error('Old save failed'));
+			const [oldResult, replacementResult] = await completed;
+			assert.equal(oldResult.status, 'rejected');
+			assert.equal(service.getDatabase('test'), replacement);
+			assert.deepEqual(locks, ['test']);
+			assert.equal(replacementResult.status, 'fulfilled');
+			assert.equal(service.getFieldValue('test', 'Entry', 'Password'), 'saved in replacement');
+			assert.equal(persisted.get('test.kdbx').fields.Password, 'saved in replacement');
+		});
+	}
+}
+
 test('queued mutations reject if the profile was locked and reopened', async t => {
 	const {service, setWrite} = await fixture(t);
 	const pending = deferred();
