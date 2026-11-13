@@ -34,6 +34,20 @@ Cleanup checks simulate non-recursive directory-removal failures, verify that
 unindexed empty folders use local trash deepest first, and ensure cleanup errors
 are reported without undoing successful migration or its path updates.
 
+## Chip browser regression checks
+
+Run `npm run test:chips` with Chrome, Chromium, or Edge installed. Set
+`VAULTCRYPT_CHROME_PATH` to its executable if it is not discovered automatically.
+This separate check uses an isolated headless browser profile and mock secrets,
+clipboard, and unlock dialog; it does not access a vault.
+
+The check runs the actual chip renderer and markdown post-processor inside table
+cells with a parent `pointerdown` handler, reproducing the table interaction in
+[issue #93](https://github.com/romejoe/VaultCrypt/issues/93). It checks locked and
+revealed secret and attachment chips with compact mode on and off: opening and
+dismissing unlock, selecting values, copying, and editing must not activate the
+cell editor. Clicking outside the chip must still reach the table cell.
+
 ## Manual acceptance before merging
 
 Use a disposable Obsidian vault with test secrets only. Build with `npm run build`
@@ -73,6 +87,19 @@ Do not use a production vault for file-collision or missing-directory checks.
   are not duplicated and there are no console errors.
 - Check an already-open note in live preview and reading mode, including secret
   tokens in a table. Confirm chips render, unlock, reveal, and copy as before.
+- With **Auto unmask chips** enabled, click revealed chip padding, Edit, Copy,
+  and the lock icon. Confirm the chip stays rendered and Edit opens its input.
+  Repeat with **Compact chips** on and off and after manually revealing a chip.
+  Drag across part of the displayed value and confirm the text stays selectable,
+  then select Edit. Repeat by focusing Edit with Tab and activating it with Enter.
+  Check attachment Save, Copy, and preview controls, and confirm inline editing
+  still supports text selection, saving, cancelling, and expanding to multi-line.
+- With a profile locked, select its chip label to open the unlock dialog, then
+  cancel. Confirm the chip remains rendered and locked. Repeat for attachment
+  chips with **Compact chips** on and off, including clicks on chip padding.
+  Repeat inside a rendered live-preview table cell: opening or cancelling unlock
+  must not activate the cell editor or reveal the raw token. Also check value
+  selection and Edit inside a table, then select outside the chip to edit the cell.
 - With Obsidian closed and the test storage directory empty, replace that
   directory with a file at the same path. Restart and confirm a path-specific
   error appears and the file is preserved. Repeat for a parent path segment.

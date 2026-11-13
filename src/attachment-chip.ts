@@ -6,6 +6,7 @@ import {computed, effect, peek, signal, StopEffect} from '@maverick-js/signals';
 import {html, render, nothing} from 'lit-html';
 import {unsafeHTML} from 'lit-html/directives/unsafe-html.js';
 import {CHIP_DESTROY_EVENT} from './chip-component';
+import {protectChipControls} from './chip-interactions';
 
 export const ATTACHMENT_PREFIX = 'attachment:';
 
@@ -151,6 +152,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
+	protectChipControls(root);
 	root.dataset.vcCopyText = token.raw;
 	root.title = `${profileId}/${token.entryPath}#${token.fieldName}`;
 
@@ -341,10 +343,6 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 				      @click=${onReveal} @keydown=${onRevealKey}>••••••••</span>
 				${isText ? html`
 					<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
-					        @mousedown=${(evt: MouseEvent) => {
-								evt.preventDefault();
-								evt.stopPropagation();
-							}}
 					        @click=${(evt: MouseEvent) => {
 								evt.stopPropagation();
 								copyAttachment();
