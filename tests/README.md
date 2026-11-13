@@ -13,6 +13,13 @@ and inline saves, duplicate references, masked/locked chips, missing fields,
 active edits, failed saves (including overlapping saves across profiles), and
 observer cleanup.
 
+Session-mutation checks pause saves and writes to verify that each profile's
+mutations, persistence, and rollback run in order. They cover overlapping field
+edits with a failed save, later persistence of the successful value, entry and
+attachment changes, independent profiles, and queued requests whose session was
+locked or replaced. Failed entry creation locks the profile so queued saves
+cannot persist the rejected entry or its new groups.
+
 The hidden-database cases reproduce [issue #85](https://github.com/romejoe/VaultCrypt/issues/85).
 They use real KDBX v3/v4 encryption with reduced test-only KDF parameters and cover
 creation, unlock, editing, lock, password verification, and reopening saved data.

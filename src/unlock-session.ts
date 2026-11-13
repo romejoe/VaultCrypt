@@ -3,6 +3,7 @@ import {readKdbxFile, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 import {signal} from '@maverick-js/signals';
+import {ProfileMutationQueue} from './profile-mutation-queue';
 
 const PROTECTED_FIELDS = new Set(['Password']);
 
@@ -34,6 +35,7 @@ export interface DbTreeEntry {
  * Note: kdbxweb's Argon2 implementation must be registered globally
  * (done in KdbxService constructor) before unlockProfile() is called.
  *
+ * Mutations and persistence are serialized per profile, including rollback.
  * Error-handling strategy for mutations:
  * - {@link setAttachment} and {@link setFieldValue} restore the in-memory
  *   entry to its previous state on save failure, keeping the session usable.
@@ -42,6 +44,8 @@ export interface DbTreeEntry {
  * - {@link deleteAttachment} and {@link deleteEntry} cannot trivially roll
  *   back, so they call {@link lockProfile} on save failure, forcing a clean
  *   reload from disk on next unlock.
+ * - {@link createEntryWithFields} also locks on failure to discard new entries
+ *   and groups before any queued mutation can persist them.
  * Callers that mix both (e.g. the edit modal) should apply additions before
  * deletions so that a failed add does not leave committed deletions behind.
  */
@@ -51,6 +55,7 @@ export class UnlockSessionService {
 	private readonly lockCallbacks: LockCallback[] = [];
 	private readonly unlockCallbacks: UnlockCallback[] = [];
 	private readonly fieldRevision$ = signal(0);
+	private readonly mutations = new ProfileMutationQueue();
 
 	constructor(private readonly app: App) {
 	}
@@ -157,42 +162,41 @@ export class UnlockSessionService {
 	 * Creates the entry (and any intermediate groups) if they don't already exist.
 	 * Throws if the profile is locked.
 	 */
-	async setFieldValue(
+	setFieldValue(
 		profileId: string,
 		entryPath: string,
 		fieldName: string,
 		newValue: string,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		return this.mutateProfile(profileId, async db => {
+			const existingEntry = this.resolveEntry(db, entryPath);
+			const entry = existingEntry ?? this.resolveOrCreateEntry(db, entryPath);
+			const previousValue = entry.fields.get(fieldName);
 
-		const existingEntry = this.resolveEntry(db, entryPath);
-		const entry = existingEntry ?? this.resolveOrCreateEntry(db, entryPath);
-		const previousValue = entry.fields.get(fieldName);
+			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
+				? kdbxweb.ProtectedValue.fromString(newValue)
+				: newValue;
+			entry.fields.set(fieldName, fieldValue);
+			entry.times.update();
 
-		const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
-			? kdbxweb.ProtectedValue.fromString(newValue)
-			: newValue;
-		entry.fields.set(fieldName, fieldValue);
-		entry.times.update();
-
-		try {
-			const buffer = await db.save();
-			await this.saveKdbx(kdbxFilePath, buffer);
-		} catch (err) {
-			if (!existingEntry) {
-				// Reload from disk to discard the new entry and any new groups.
-				this.lockProfile(profileId);
-			} else if (previousValue === undefined) {
-				entry.fields.delete(fieldName);
-			} else {
-				entry.fields.set(fieldName, previousValue);
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				if (!existingEntry) {
+					// Reload from disk to discard the new entry and any new groups.
+					this.lockProfile(profileId);
+				} else if (previousValue === undefined) {
+					entry.fields.delete(fieldName);
+				} else {
+					entry.fields.set(fieldName, previousValue);
+				}
+				this.fieldRevision$.set(revision => revision + 1);
+				throw err;
 			}
 			this.fieldRevision$.set(revision => revision + 1);
-			throw err;
-		}
-		this.fieldRevision$.set(revision => revision + 1);
+		});
 	}
 
 	/**
@@ -229,51 +233,50 @@ export class UnlockSessionService {
 	 * `fields` but present on the entry are removed.  The Title field is never
 	 * modified.  Throws if the profile is locked or the entry does not exist.
 	 */
-	async updateEntryFields(
+	updateEntryFields(
 		profileId: string,
 		entryPath: string,
 		fields: Record<string, string>,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		return this.mutateProfile(profileId, async db => {
+			const entry = this.resolveEntry(db, entryPath);
+			if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
 
-		const entry = this.resolveEntry(db, entryPath);
-		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+			// Snapshot existing fields so we can restore on save failure.
+			const snapshot = new Map(entry.fields);
 
-		// Snapshot existing fields so we can restore on save failure.
-		const snapshot = new Map(entry.fields);
+			// Remove all non-Title fields, then re-set from the provided record.
+			const keysToRemove = [...entry.fields.keys()].filter(k => k !== 'Title');
+			for (const key of keysToRemove) {
+				entry.fields.delete(key);
+			}
 
-		// Remove all non-Title fields, then re-set from the provided record.
-		const keysToRemove = [...entry.fields.keys()].filter(k => k !== 'Title');
-		for (const key of keysToRemove) {
-			entry.fields.delete(key);
-		}
+			for (const [key, value] of Object.entries(fields)) {
+				if (key === 'Title') continue;
+				if (!value) continue;
+				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
+					? kdbxweb.ProtectedValue.fromString(value)
+					: value;
+				entry.fields.set(key, fieldValue);
+			}
+			entry.times.update();
 
-		for (const [key, value] of Object.entries(fields)) {
-			if (key === 'Title') continue;
-			if (!value) continue;
-			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
-				? kdbxweb.ProtectedValue.fromString(value)
-				: value;
-			entry.fields.set(key, fieldValue);
-		}
-		entry.times.update();
-
-		try {
-			const buffer = await db.save();
-			await this.saveKdbx(kdbxFilePath, buffer);
-		} catch (err) {
-			// Restore the entry to its pre-edit state so the in-memory session
-			// does not serve unsaved changes.
-			entry.fields.clear();
-			for (const [k, v] of snapshot) entry.fields.set(k, v);
-			// Another profile's save may have refreshed chips during this save.
-			// Refresh again so those chips discard the rejected values.
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				// Restore the entry to its pre-edit state so the in-memory session
+				// does not serve unsaved changes.
+				entry.fields.clear();
+				for (const [k, v] of snapshot) entry.fields.set(k, v);
+				// Another profile's save may have refreshed chips during this save.
+				// Refresh again so those chips discard the rejected values.
+				this.fieldRevision$.set(revision => revision + 1);
+				throw err;
+			}
 			this.fieldRevision$.set(revision => revision + 1);
-			throw err;
-		}
-		this.fieldRevision$.set(revision => revision + 1);
+		});
 	}
 
 	/**
@@ -282,29 +285,28 @@ export class UnlockSessionService {
 	 * cannot serve stale data.  Throws if the profile is locked or the entry
 	 * does not exist.
 	 */
-	async deleteEntry(
+	deleteEntry(
 		profileId: string,
 		entryPath: string,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		return this.mutateProfile(profileId, async db => {
+			const entry = this.resolveEntry(db, entryPath);
+			if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
 
-		const entry = this.resolveEntry(db, entryPath);
-		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+			db.remove(entry);
 
-		db.remove(entry);
-
-		try {
-			const buffer = await db.save();
-			await this.saveKdbx(kdbxFilePath, buffer);
-		} catch (err) {
-			// A delete cannot be trivially rolled back in kdbxweb, so lock the
-			// profile to force a clean reload from disk on next unlock.
-			this.lockProfile(profileId);
-			throw err;
-		}
-		this.fieldRevision$.set(revision => revision + 1);
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				// A delete cannot be trivially rolled back in kdbxweb, so lock the
+				// profile to force a clean reload from disk on next unlock.
+				this.lockProfile(profileId);
+				throw err;
+			}
+			this.fieldRevision$.set(revision => revision + 1);
+		});
 	}
 
 	/**
@@ -369,36 +371,36 @@ export class UnlockSessionService {
 	 * Adds or replaces a named binary attachment on an entry and saves the database.
 	 * Throws if the profile is locked or the entry does not exist.
 	 */
-	async setAttachment(
+	setAttachment(
 		profileId: string,
 		entryPath: string,
 		filename: string,
 		data: ArrayBuffer,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
-		const entry = this.resolveEntry(db, entryPath);
-		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+		return this.mutateProfile(profileId, async db => {
+			const entry = this.resolveEntry(db, entryPath);
+			if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
 
-		const binaryRef = await db.createBinary(data);
-		const oldBinary = entry.binaries.get(filename);
-		entry.binaries.set(filename, binaryRef);
-		entry.times.update();
+			const binaryRef = await db.createBinary(data);
+			const oldBinary = entry.binaries.get(filename);
+			entry.binaries.set(filename, binaryRef);
+			entry.times.update();
 
-		try {
-			const buffer = await db.save();
-			await this.saveKdbx(kdbxFilePath, buffer);
-		} catch (err) {
-			// Restore entry to pre-set state and reclaim the pool entry.
-			if (oldBinary !== undefined) {
-				entry.binaries.set(filename, oldBinary);
-			} else {
-				entry.binaries.delete(filename);
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				// Restore entry to pre-set state and reclaim the pool entry.
+				if (oldBinary !== undefined) {
+					entry.binaries.set(filename, oldBinary);
+				} else {
+					entry.binaries.delete(filename);
+				}
+				db.cleanup({ binaries: true });
+				throw err;
 			}
-			db.cleanup({ binaries: true });
-			throw err;
-		}
+		});
 	}
 
 	/**
@@ -407,31 +409,31 @@ export class UnlockSessionService {
 	 * If persistence fails the profile is locked to force a clean reload.
 	 * Throws if the profile is locked or the entry does not exist.
 	 */
-	async deleteAttachment(
+	deleteAttachment(
 		profileId: string,
 		entryPath: string,
 		filename: string,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
-		const entry = this.resolveEntry(db, entryPath);
-		if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
+		return this.mutateProfile(profileId, async db => {
+			const entry = this.resolveEntry(db, entryPath);
+			if (!entry) throw new Error(`Entry not found at "${entryPath}"`);
 
-		if (!entry.binaries.has(filename)) return; // idempotent
+			if (!entry.binaries.has(filename)) return; // idempotent
 
-		entry.binaries.delete(filename);
-		entry.times.update();
-		db.cleanup({ binaries: true }); // reclaim unreferenced pool slot before save
+			entry.binaries.delete(filename);
+			entry.times.update();
+			db.cleanup({ binaries: true }); // reclaim unreferenced pool slot before save
 
-		try {
-			const buffer = await db.save();
-			await this.saveKdbx(kdbxFilePath, buffer);
-		} catch (err) {
-			// Cannot trivially roll back; lock to force a clean reload from disk.
-			this.lockProfile(profileId);
-			throw err;
-		}
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				// Cannot trivially roll back; lock to force a clean reload from disk.
+				this.lockProfile(profileId);
+				throw err;
+			}
+		});
 	}
 
 	/**
@@ -450,32 +452,36 @@ export class UnlockSessionService {
 	 * Creates a new entry with all provided fields at once and saves the database.
 	 * Throws if the profile is locked, or if an entry already exists at the given path.
 	 */
-	async createEntryWithFields(
+	createEntryWithFields(
 		profileId: string,
 		entryPath: string,
 		fields: Record<string, string>,
 		kdbxFilePath: string,
 	): Promise<void> {
-		const db = this.getDatabase(profileId);
-		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		return this.mutateProfile(profileId, async db => {
+			if (this.resolveEntry(db, entryPath)) {
+				throw new Error(`An entry already exists at "${entryPath}"`);
+			}
 
-		if (this.resolveEntry(db, entryPath)) {
-			throw new Error(`An entry already exists at "${entryPath}"`);
-		}
+			const entry = this.resolveOrCreateEntry(db, entryPath);
+			for (const [key, value] of Object.entries(fields)) {
+				if (!value) continue;
+				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
+					? kdbxweb.ProtectedValue.fromString(value)
+					: value;
+				entry.fields.set(key, fieldValue);
+			}
+			entry.times.update();
 
-		const entry = this.resolveOrCreateEntry(db, entryPath);
-		for (const [key, value] of Object.entries(fields)) {
-			if (!value) continue;
-			const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
-				? kdbxweb.ProtectedValue.fromString(value)
-				: value;
-			entry.fields.set(key, fieldValue);
-		}
-		entry.times.update();
-
-		const buffer = await db.save();
-		await this.saveKdbx(kdbxFilePath, buffer);
-		this.fieldRevision$.set(revision => revision + 1);
+			try {
+				const buffer = await db.save();
+				await this.saveKdbx(kdbxFilePath, buffer);
+			} catch (err) {
+				this.lockProfile(profileId);
+				throw err;
+			}
+			this.fieldRevision$.set(revision => revision + 1);
+		});
 	}
 
 	/** Register a callback to be called when any profile is locked. */
@@ -486,6 +492,17 @@ export class UnlockSessionService {
 	/** Register a callback to be called when any profile is unlocked. */
 	onUnlock(cb: UnlockCallback): void {
 		this.unlockCallbacks.push(cb);
+	}
+
+	private async mutateProfile(profileId: string, mutation: (db: kdbxweb.Kdbx) => Promise<void>): Promise<void> {
+		const db = this.getDatabase(profileId);
+		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
+		await this.mutations.run(profileId, async () => {
+			if (this.getDatabase(profileId) !== db) {
+				throw new Error(`Profile "${profileId}" session changed before the save could start`);
+			}
+			await mutation(db);
+		});
 	}
 
 	private async saveKdbx(path: string, buffer: ArrayBuffer): Promise<void> {

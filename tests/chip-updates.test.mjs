@@ -352,6 +352,31 @@ for (const failure of ['save', 'write']) {
 	});
 }
 
+test('overlapping single-field saves keep the later successful value after rollback', async t => {
+	let persist = () => Promise.resolve();
+	const {service, chip} = await fixture(t, {write: () => persist()});
+	const root = chip();
+	let rejectWrite;
+	persist = () => new Promise((resolve, reject) => { rejectWrite = reject; });
+	const first = service.setFieldValue('test', 'Entry', 'Password', 'rejected', 'test.kdbx');
+	const failedSave = assert.rejects(first, /Could not save KDBX file/);
+	await Promise.resolve();
+	assert.equal(typeof rejectWrite, 'function');
+	persist = () => Promise.resolve();
+	const second = service.setFieldValue('test', 'Entry', 'Password', 'saved later', 'test.kdbx');
+	await Promise.resolve();
+	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), 'rejected');
+	rejectWrite(new Error('Disk unavailable'));
+	await failedSave;
+	await second;
+	tick();
+	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), 'saved later');
+	assert.equal(root.dataset.vcCopyText, 'saved later');
+	await service.setFieldValue('test', 'Entry', 'Notes', 'another save', 'test.kdbx');
+	tick();
+	assert.equal(root.dataset.vcCopyText, 'saved later');
+});
+
 test('destroyed chips stop observing field changes', async t => {
 	const {service, chip} = await fixture(t);
 	const root = chip();
