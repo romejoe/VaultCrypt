@@ -225,7 +225,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 				renderLocked();
 			} else if (currentState === 'masked') {
 				renderMasked();
-			} else if (currentState === 'revealed') {
+			} else if (currentState === 'revealed' || currentState === 'masked-error') {
 				// Skip re-render if we're in editing mode
 				if (peek(editState) !== null) return;
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
@@ -235,10 +235,9 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					renderMaskedError(peek(errorReason));
 
 				} else {
+					chipState.set('revealed');
 					renderRevealed(value);
 				}
-			} else if (currentState === 'masked-error') {
-				renderMaskedError(peek(errorReason));
 			}
 		}),
 
