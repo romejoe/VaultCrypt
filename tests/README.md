@@ -10,7 +10,8 @@ The chip-update cases reproduce [issue #59](https://github.com/romejoe/VaultCryp
 They use the real session service, KDBX entry data, signals, chip templates, and
 editor widgets with DOM/template and CodeMirror mounting mocks. They cover entry
 and inline saves, duplicate references, masked/locked chips, missing fields,
-active edits, failed saves, and observer cleanup.
+active edits, failed saves (including overlapping saves across profiles), and
+observer cleanup.
 
 The hidden-database cases reproduce [issue #85](https://github.com/romejoe/VaultCrypt/issues/85).
 They use real KDBX v3/v4 encryption with reduced test-only KDF parameters and cover

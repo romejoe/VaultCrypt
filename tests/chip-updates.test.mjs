@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
-import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
 
 // Exercise the real session, signals and chip templates with an in-memory KDBX.
 // Only Obsidian and DOM/template plumbing are replaced; no vault files are used.
 const require = createRequire(import.meta.url);
-const kdbxUrl = pathToFileURL(require.resolve('kdbxweb')).href;
+const kdbxPath = require.resolve('kdbxweb');
 const mocks = {
 	obsidian: `
 		export class TFile {}
@@ -54,6 +53,7 @@ const mocks = {
 };
 const {outputFiles} = await build({
 	stdin: {
+		sourcefile: 'chip-test-runtime.mjs',
 		contents: `
 			export {UnlockSessionService} from './src/unlock-session.ts';
 			export {buildChipElement, CHIP_DESTROY_EVENT} from './src/chip-component.ts';
@@ -61,28 +61,29 @@ const {outputFiles} = await build({
 			export {buildEditorExtension, refreshChipsEffect} from './src/editor-extension.ts';
 			export {signal, tick} from '@maverick-js/signals';
 			export {TFile} from 'obsidian';
-			export {Kdbx, KdbxCredentials, ProtectedValue} from 'kdbxweb';
+			import kdbxweb from 'kdbxweb';
+			export const {Kdbx, KdbxCredentials, ProtectedValue} = kdbxweb;
 		`,
 		resolveDir: process.cwd(),
 	},
 	bundle: true,
 	write: false,
-	format: 'esm',
+	format: 'cjs',
 	platform: 'node',
 	plugins: [{
 		name: 'chip-test-runtime',
 		setup(builder) {
-			builder.onResolve({filter: /^kdbxweb$/}, () => ({path: kdbxUrl, external: true}));
+			builder.onResolve({filter: /^kdbxweb$/}, () => ({path: kdbxPath, external: true}));
 			builder.onResolve({filter: /.*/}, args => args.path in mocks
 				? {path: args.path, namespace: 'test'} : undefined);
 			builder.onLoad({filter: /.*/, namespace: 'test'}, args => ({contents: mocks[args.path]}));
 		},
 	}],
 });
+const module = {exports: {}};
+new Function('require', 'module', 'exports', outputFiles[0].text)(require, module, module.exports);
 const {UnlockSessionService, buildChipElement, CHIP_DESTROY_EVENT, parseVcTokens, buildEditorExtension, refreshChipsEffect,
-	signal, tick, TFile, Kdbx, KdbxCredentials, ProtectedValue} = await import(
-	`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
-);
+	signal, tick, TFile, Kdbx, KdbxCredentials, ProtectedValue} = module.exports;
 
 globalThis.document = {
 	created: 0,
@@ -285,6 +286,71 @@ test('an entry edit refreshes only after persistence succeeds; failed saves reta
 	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), 'after');
 	assert.equal(root.dataset.vcCopyText, 'after');
 });
+
+test('failed entry saves restore chips refreshed by another profile during persistence', async t => {
+	let persist = () => Promise.resolve();
+	const {service, chip, plugin} = await fixture(t, {write: () => persist()});
+	const otherDb = Kdbx.create(new KdbxCredentials(ProtectedValue.fromString('test')), 'other');
+	t.mock.method(Kdbx, 'load', async () => otherDb);
+	t.mock.method(otherDb, 'save', async () => new ArrayBuffer(0));
+	await service.unlockProfile('other', {...plugin.settings$().profiles.test, path: 'other.kdbx'}, 'test');
+	const root = chip();
+	let rejectWrite;
+	persist = () => new Promise((resolve, reject) => { rejectWrite = reject; });
+	const saving = service.updateEntryFields('test', 'Entry', {Password: 'unsaved'}, 'test.kdbx');
+	const failedSave = assert.rejects(saving, /Could not save KDBX file/);
+	await Promise.resolve();
+	assert.equal(typeof rejectWrite, 'function');
+	persist = () => Promise.resolve();
+	await service.createEntryWithFields('other', 'Entry', {Password: 'other value'}, 'other.kdbx');
+	tick();
+	rejectWrite(new Error('Disk unavailable'));
+	await failedSave;
+	tick();
+	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), 'before');
+	assert.equal(root.dataset.vcCopyText, 'before');
+	assert.ok(!templateText(root.template).includes('unsaved'));
+});
+
+for (const failure of ['save', 'write']) {
+	for (const fieldName of ['Password', 'NewField']) {
+		test(`failed single-field ${failure} restores ${fieldName} before another profile refreshes chips`, async t => {
+			let persist = () => Promise.resolve();
+			const {service, chip, plugin} = await fixture(t, {write: () => persist()});
+			const otherDb = Kdbx.create(new KdbxCredentials(ProtectedValue.fromString('test')), 'other');
+			t.mock.method(Kdbx, 'load', async () => otherDb);
+			t.mock.method(otherDb, 'save', async () => new ArrayBuffer(0));
+			await service.unlockProfile('other', {...plugin.settings$().profiles.test, path: 'other.kdbx'}, 'test');
+			const root = chip(`{{vc:test/Entry#${fieldName}}}`);
+			const fail = async () => { throw new Error('Save failed'); };
+			const dbSave = service.getDatabase('test').save;
+			if (failure === 'save') service.getDatabase('test').save = fail;
+			else persist = fail;
+			await assert.rejects(service.setFieldValue('test', 'Entry', fieldName, 'unsaved', 'test.kdbx'));
+			service.getDatabase('test').save = dbSave;
+			persist = () => Promise.resolve();
+			await service.createEntryWithFields('other', 'Entry', {Password: 'other value'}, 'other.kdbx');
+			tick();
+			assert.equal(service.getFieldValue('test', 'Entry', fieldName), fieldName === 'Password' ? 'before' : null);
+			assert.equal(root.dataset.vcCopyText, fieldName === 'Password' ? 'before' : '[encrypted]');
+			assert.ok(!templateText(root.template).includes('unsaved'));
+		});
+	}
+
+	test(`failed single-field ${failure} locks a profile when it created an entry`, async t => {
+		let persist = () => Promise.resolve();
+		const {service} = await fixture(t, {write: () => persist()});
+		const locked = [];
+		service.onLock(id => locked.push(id));
+		const fail = async () => { throw new Error('Save failed'); };
+		if (failure === 'save') t.mock.method(service.getDatabase('test'), 'save', fail);
+		else persist = fail;
+		await assert.rejects(service.setFieldValue('test', 'NewGroup/NewEntry', 'Password', 'unsaved', 'test.kdbx'));
+		assert.equal(service.isUnlocked('test'), false);
+		assert.equal(service.getFieldValue('test', 'NewGroup/NewEntry', 'Password'), null);
+		assert.deepEqual(locked, ['test']);
+	});
+}
 
 test('destroyed chips stop observing field changes', async t => {
 	const {service, chip} = await fixture(t);

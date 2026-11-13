@@ -37,6 +37,8 @@ export interface DbTreeEntry {
  * Error-handling strategy for mutations:
  * - {@link setAttachment} and {@link setFieldValue} restore the in-memory
  *   entry to its previous state on save failure, keeping the session usable.
+ *   If setFieldValue created an entry, it locks the profile instead so new
+ *   entries and groups are discarded on the next unlock.
  * - {@link deleteAttachment} and {@link deleteEntry} cannot trivially roll
  *   back, so they call {@link lockProfile} on save failure, forcing a clean
  *   reload from disk on next unlock.
@@ -44,13 +46,13 @@ export interface DbTreeEntry {
  * deletions so that a failed add does not leave committed deletions behind.
  */
 export class UnlockSessionService {
-	private openDbs = new Map<string, kdbxweb.Kdbx>();
-	private timers = new Map<string, number>();
-	private lockCallbacks: LockCallback[] = [];
-	private unlockCallbacks: UnlockCallback[] = [];
+	private readonly openDbs = new Map<string, kdbxweb.Kdbx>();
+	private readonly timers = new Map<string, number>();
+	private readonly lockCallbacks: LockCallback[] = [];
+	private readonly unlockCallbacks: UnlockCallback[] = [];
 	private readonly fieldRevision$ = signal(0);
 
-	constructor(private app: App) {
+	constructor(private readonly app: App) {
 	}
 
 	/** Opens a KDBX database and stores it in the session. Throws on wrong password. */
@@ -104,7 +106,7 @@ export class UnlockSessionService {
 
 	/** Locks all currently unlocked profiles. */
 	lockAll(): void {
-		for (const profileId of [...this.openDbs.keys()]) {
+		for (const profileId of this.openDbs.keys()) {
 			this.lockProfile(profileId);
 		}
 	}
@@ -165,10 +167,9 @@ export class UnlockSessionService {
 		const db = this.getDatabase(profileId);
 		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
 
-		let entry = this.resolveEntry(db, entryPath);
-		if (!entry) {
-			entry = this.resolveOrCreateEntry(db, entryPath);
-		}
+		const existingEntry = this.resolveEntry(db, entryPath);
+		const entry = existingEntry ?? this.resolveOrCreateEntry(db, entryPath);
+		const previousValue = entry.fields.get(fieldName);
 
 		const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(fieldName)
 			? kdbxweb.ProtectedValue.fromString(newValue)
@@ -176,8 +177,21 @@ export class UnlockSessionService {
 		entry.fields.set(fieldName, fieldValue);
 		entry.times.update();
 
-		const buffer = await db.save();
-		await this.saveKdbx(kdbxFilePath, buffer);
+		try {
+			const buffer = await db.save();
+			await this.saveKdbx(kdbxFilePath, buffer);
+		} catch (err) {
+			if (!existingEntry) {
+				// Reload from disk to discard the new entry and any new groups.
+				this.lockProfile(profileId);
+			} else if (previousValue === undefined) {
+				entry.fields.delete(fieldName);
+			} else {
+				entry.fields.set(fieldName, previousValue);
+			}
+			this.fieldRevision$.set(revision => revision + 1);
+			throw err;
+		}
 		this.fieldRevision$.set(revision => revision + 1);
 	}
 
@@ -254,6 +268,9 @@ export class UnlockSessionService {
 			// does not serve unsaved changes.
 			entry.fields.clear();
 			for (const [k, v] of snapshot) entry.fields.set(k, v);
+			// Another profile's save may have refreshed chips during this save.
+			// Refresh again so those chips discard the rejected values.
+			this.fieldRevision$.set(revision => revision + 1);
 			throw err;
 		}
 		this.fieldRevision$.set(revision => revision + 1);
