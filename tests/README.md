@@ -48,6 +48,11 @@ revealed secret and attachment chips with compact mode on and off: opening and
 dismissing unlock, selecting values, copying, and editing must not activate the
 cell editor. Clicking outside the chip must still reach the table cell.
 
+Successful chip-triggered unlocks are checked with **Auto unmask chips** on and
+off, both in CodeMirror and rendered table cells. Signal updates are flushed
+before and after modal completion to catch callbacks overriding the unlock
+state. Manually masking an automatically revealed value must still work.
+
 ## Manual acceptance before merging
 
 Use a disposable Obsidian vault with test secrets only. Build with `npm run build`

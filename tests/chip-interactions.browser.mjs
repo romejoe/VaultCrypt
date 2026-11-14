@@ -45,6 +45,12 @@ const {outputFiles} = await build({
       view.focus();
       tick();
       window.view = view;
+      window.flushSignals = tick;
+      window.unlockProfile = (flushFirst = true) => {
+        options.locked = false;
+        plugin.vaultCryptState$.set({profiles: [{id: 'test', isLocked: false}]});
+        if (flushFirst) tick();
+      };
       if (options.table) {
         view.destroy();
         const table = document.createElement('table');table.id='table-fixture';
@@ -62,7 +68,19 @@ const {outputFiles} = await build({
   plugins: [{name: 'mock-host', setup(builder) {
     builder.onResolve({filter: /^obsidian$/}, () => ({path: 'host', namespace: 'mock'}));
     builder.onResolve({filter: /^\.\/modals$/}, () => ({path: 'modals', namespace: 'mock'}));
-    builder.onLoad({filter: /.*/, namespace: 'mock'}, args => ({contents: args.path === 'host' ? `import {StateField} from '@codemirror/state'; export const editorLivePreviewField = StateField.define({create: () => true, update: value => value}); export class Menu {} export class Notice {} export class TFile {} export const Platform = {isDesktop: true};` : `export class UnlockModal {open() {const modal=document.createElement('div');modal.id='mock-unlock';const input=document.createElement('input');modal.append(input);document.body.append(modal);input.focus();}} export class EditSecretModal {} export class DeleteSecretModal {}`, resolveDir: process.cwd()}));
+    builder.onLoad({filter: /.*/, namespace: 'mock'}, args => ({contents: args.path === 'host' ? `import {StateField} from '@codemirror/state'; export const editorLivePreviewField = StateField.define({create: () => true, update: value => value}); export class Menu {} export class Notice {} export class TFile {} export const Platform = {isDesktop: true};` : `
+      export class UnlockModal {
+        constructor(app, plugin, profileId, onDone) {this.profileId=profileId;this.onDone=onDone;}
+        open() {
+          const modal=document.createElement('div');modal.id='mock-unlock';
+          const input=document.createElement('input');modal.append(input);document.body.append(modal);input.focus();
+          window.completeUnlock = (flushFirst = true) => {
+            window.unlockProfile(flushFirst);modal.remove();this.onDone?.(this.profileId);window.flushSignals();
+          };
+        }
+      }
+      export class EditSecretModal {} export class DeleteSecretModal {}
+    `, resolveDir: process.cwd()}));
   }}]
 });
 const {readFile} = await import('node:fs/promises');
@@ -96,6 +114,21 @@ try {
       await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
+    }
+    for (const table of [false,true]) for (const attachment of [false,true]) for (const autoUnmask of [false,true]) for (const flushFirst of [false,true]) {
+      await evaluate(`window.reset(${JSON.stringify({table,attachment,autoUnmask,locked:true})})`);await delay(50);
+      await click('.vaultcrypt-chip-locked > span');
+      await evaluate(`window.completeUnlock(${flushFirst})`);await delay(50);
+      const displayedValue = await evaluate('document.querySelector(".vaultcrypt-chip-value")?.textContent ?? null');
+      assert.equal(displayedValue,autoUnmask?(attachment?'sample.txt':'sample value'):null,
+        `unlock must honor autoUnmask=${autoUnmask}, table=${table}, attachment=${attachment}, flushFirst=${flushFirst}`);
+      assert.equal(await evaluate('!!document.querySelector(".vaultcrypt-chip-locked")'),false);
+      if (autoUnmask) {
+        await click(attachment?'[title="Mask attachment"]':'[title="Click to mask"]');
+        assert.equal(await evaluate('document.querySelector(".vaultcrypt-chip-value")?.textContent ?? null'),null,
+          'manually masking an auto-revealed chip must remain possible');
+      }
+      console.log(`PASS unlock autoUnmask=${autoUnmask}, table=${table}, attachment=${attachment}, flushFirst=${flushFirst}`);
     }
     for (const attachment of [false,true]) for (const locked of [false,true]) for (const compactChips of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({attachment,compactChips,table:true,locked})})`);await delay(50);

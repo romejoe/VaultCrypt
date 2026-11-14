@@ -307,9 +307,7 @@ export function buildAttachmentChipElement(token: ParsedVcToken, plugin: VaultCr
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-locked';
 		const openUnlock = (evt: Event) => {
 			evt.stopPropagation();
-			new UnlockModal(plugin.app, plugin, profileId, () => {
-				chipState.set(resolveAttachmentState());
-			}).open();
+			new UnlockModal(plugin.app, plugin, profileId).open();
 		};
 		render(html`
 			<span role="button" tabindex="0" aria-label="Unlock ${profileId}"

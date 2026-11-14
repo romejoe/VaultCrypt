@@ -290,9 +290,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		render(html`
 			<span @click=${(evt: MouseEvent) => {
 				evt.stopPropagation();
-				new UnlockModal(plugin.app, plugin, profileId, () => {
-					chipState.set('masked');
-				}).open();
+				new UnlockModal(plugin.app, plugin, profileId).open();
 			}}>${compact() ? '🔒 ••••••••' : `🔒 ${tooltipPath()}`}</span>
 		`, root);
 	}
