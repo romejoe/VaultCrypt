@@ -6,6 +6,7 @@ import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {html, render, nothing} from 'lit-html';
 import {ref, createRef} from 'lit-html/directives/ref.js';
 import {buildAttachmentChipElement, ATTACHMENT_PREFIX} from './attachment-chip';
+import {protectChipControls} from './chip-interactions';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
 
@@ -62,6 +63,9 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
+	protectChipControls(root);
+
+
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const errorReason = signal<string>('');
 	const justSaved = signal(false);
@@ -283,9 +287,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		render(html`
 			<span @click=${(evt: MouseEvent) => {
 				evt.stopPropagation();
-				new UnlockModal(plugin.app, plugin, profileId, () => {
-					chipState.set('masked');
-				}).open();
+				new UnlockModal(plugin.app, plugin, profileId).open();
 			}}>${compact() ? '🔒 ••••••••' : `🔒 ${tooltipPath()}`}</span>
 		`, root);
 	}
@@ -303,10 +305,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 			<span class="vaultcrypt-chip-dots"
 				@click=${onReveal}>••••••••</span>
 			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
-				@mousedown=${(evt: MouseEvent) => {
-					evt.preventDefault();
-					evt.stopPropagation();
-				}}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					copyField(profileId, token.entryPath, peek(field), plugin);
@@ -369,10 +367,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					}}>${showSaved ? '✅' : '✏️'}</button>
 			` : nothing}
 			<button class="vaultcrypt-chip-btn" title="Copy to clipboard"
-				@mousedown=${(evt: MouseEvent) => {
-					evt.preventDefault();
-					evt.stopPropagation();
-				}}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					copyField(profileId, token.entryPath, peek(field), plugin);
@@ -449,10 +443,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 				@click=${(evt: MouseEvent) => evt.stopPropagation()}
 				@mousedown=${(evt: MouseEvent) => evt.stopPropagation()}>
 			<button class="vaultcrypt-chip-btn" title="Expand to multi-line"
-				@mousedown=${(evt: MouseEvent) => {
-					evt.preventDefault();
-					evt.stopPropagation();
-				}}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					const input = inputRef.value;

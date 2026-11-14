@@ -50,7 +50,6 @@ Effects on these signals update editor decorations and the status bar automatica
 ### Data Persistence
 
 - **Plugin settings** (`data.json`) — Obsidian `loadData()`/`saveData()` for profile paths, keyring status, timeouts
-- **Config mirror** (`VaultCrypt/vaultcrypt.config.json`) — JSON mirror readable by external tools
 - **Profile databases** (`VaultCrypt/{profileId}.kdbx`) — KeePass v3/v4 files
 - **Keyring** (`VaultCrypt/_keyring.kdbx`) — optional master keyring
 
