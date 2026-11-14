@@ -94,6 +94,7 @@ browser.stdio[4].on('data', chunk => { buffer += chunk; let end; while ((end = b
 function cdp(method, params = {}, sessionId = session) { return new Promise((resolve, reject) => { const id = ++counter; pending.set(id, {resolve, reject}); browser.stdio[3].write(JSON.stringify({id, method, params, ...(sessionId ? {sessionId} : {})}) + '\0'); }); }
 async function evaluate(expression) { const result = await cdp('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}); if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails)); return result.result.value; }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+let failure;
 try {
   const target = await cdp('Target.createTarget', {url: 'about:blank'}, null);
   ({sessionId: session} = await cdp('Target.attachToTarget', {targetId: target.targetId, flatten: true}, null));
@@ -109,11 +110,23 @@ try {
       assert.equal(await evaluate('window.view.state.selection.main.head'),0);
       assert.equal(await evaluate('!!document.querySelector("[data-vc-chip]")'),true);
     }
-    async function dragValue() {
-      const {x,y,width}=await evaluate(`(()=>{const r=document.querySelector('.vaultcrypt-chip-value').getBoundingClientRect();return {x:r.x+1,y:r.y+r.height/2,width:r.width-2};})()`);
+    async function dragValue(selector = '.vaultcrypt-chip-value') {
+      const {x,y,width}=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+1,y:r.y+r.height/2,width:r.width-2};})()`);
       await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
+    }
+    for (const table of [false,true]) {
+      await evaluate(`window.reset(${JSON.stringify({table,attachment:true})})`);await delay(50);
+      await click('[title="Expand preview"]');
+      await dragValue('.vaultcrypt-preview-code code');
+      assert.equal(await evaluate('document.getSelection().toString()'),'sample attachment',
+        'expanded attachment preview text must remain selectable');
+      assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-vc-chip]")).userSelect'),'none');
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".vaultcrypt-chip-btn")).userSelect'),'none');
+      if (table) assert.equal(await evaluate('window.tableActivations'),0);
+      await click('[title="Collapse preview"]');
+      console.log(`PASS attachment preview selection: table=${table}`);
     }
     for (const table of [false,true]) for (const attachment of [false,true]) for (const autoUnmask of [false,true]) for (const flushFirst of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({table,attachment,autoUnmask,locked:true})})`);await delay(50);
@@ -155,7 +168,11 @@ try {
       console.log(`PASS rendered table chip: attachment=${attachment}, locked=${locked}, compact=${compactChips}`);
     }
   }
-} finally {
+} catch (error) {
+  failure = error;
+}
+
+try {
   const exited = new Promise(resolve => browser.once('exit', resolve));
   await cdp('Browser.close', {}, null).catch(() => browser.kill());
   if (browser.exitCode === null) await exited;
@@ -163,4 +180,8 @@ try {
     throw new Error('Refusing to remove a browser profile outside the test temporary directory.');
   }
   await rm(directory, {recursive: true, force: true, maxRetries: 5, retryDelay: 100});
+} catch (error) {
+  if (failure) console.error('Browser cleanup also failed:', error);
+  else failure = error;
 }
+if (failure) throw failure;

@@ -52,6 +52,8 @@ Successful chip-triggered unlocks are checked with **Auto unmask chips** on and
 off, both in CodeMirror and rendered table cells. Signal updates are flushed
 before and after modal completion to catch callbacks overriding the unlock
 state. Manually masking an automatically revealed value must still work.
+Expanded attachment preview text must remain selectable, while chip padding
+and action controls remain non-selectable, both in the editor and in tables.
 
 ## Manual acceptance before merging
 

@@ -358,6 +358,7 @@ If your plugin does not need CSS, delete this file.
 /* Code block for text previews */
 .vaultcrypt-preview-code {
 	display: block;
+	user-select: text;
 	width: 100%;
 	margin: 0;
 	padding: 8px;
