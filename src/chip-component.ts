@@ -64,9 +64,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 	const root = document.createElement('span');
 	root.dataset.vcChip = '';
 	protectChipControls(root);
-	root.addEventListener('click', () => {
-		console.warn("Event on root");
-	});
+
 
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const errorReason = signal<string>('');
