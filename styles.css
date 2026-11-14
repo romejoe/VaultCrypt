@@ -44,7 +44,8 @@ If your plugin does not need CSS, delete this file.
 	background: rgba(var(--color-accent-rgb), 0.15);
 	color: var(--text-muted);
 	font-family: var(--font-monospace);
-	user-select: all;
+	/* Selecting the whole widget moves CodeMirror's selection to the raw token. */
+	user-select: none;
 	white-space: nowrap;
 	vertical-align: middle;
 }
