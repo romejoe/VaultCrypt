@@ -13,18 +13,19 @@ export const refreshChipsEffect = StateEffect.define<void>();
 export type VcTokenEvent = { type: 'profile-lock', profileId: string };
 
 class VcTokenWidget extends WidgetType {
-	private readonly el: HTMLElement;
+	private el?: HTMLElement;
 
 	constructor(
 		private readonly token: ParsedVcToken,
 		private readonly plugin: VaultCryptPlugin,
 	) {
 		super();
-		this.el = buildChipElement(this.token, this.plugin);
 	}
 
 	toDOM(): HTMLElement {
-		return this.el;
+		// CodeMirror may reuse an equal widget and never mount this instance.
+		// Only create reactive chip effects when its DOM is actually requested.
+		return this.el ??= buildChipElement(this.token, this.plugin);
 	}
 
 	eq(other: VcTokenWidget): boolean {
