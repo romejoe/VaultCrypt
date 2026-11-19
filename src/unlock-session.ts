@@ -56,6 +56,7 @@ export class UnlockSessionService {
 	private readonly unlockCallbacks: UnlockCallback[] = [];
 	private readonly fieldRevision$ = signal(0);
 	private readonly mutations = new ProfileMutationQueue();
+	private lockGeneration = 0;
 
 	constructor(private readonly app: App) {
 	}
@@ -66,11 +67,16 @@ export class UnlockSessionService {
 		if (this.openDbs.has(profileId)) {
 			this.lockProfile(profileId);
 		}
+		const generation = this.lockGeneration;
 		const buffer = await readKdbxFile(this.app, config.path);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
 		const db = await kdbxweb.Kdbx.load(buffer, credentials);
+		if (generation !== this.lockGeneration) {
+			db.cleanup();
+			throw new Error('Unlock cancelled because profiles were locked.');
+		}
 		this.openDbs.set(profileId, db);
 		this.scheduleAutoLock(profileId, config.autoLockMinutes);
 		this.emitUnlock(profileId);
@@ -111,9 +117,15 @@ export class UnlockSessionService {
 
 	/** Locks all currently unlocked profiles. */
 	lockAll(): void {
+		this.lockGeneration++;
 		for (const profileId of this.openDbs.keys()) {
 			this.lockProfile(profileId);
 		}
+	}
+
+	/** Identifies unlock work invalidated by a subsequent lockAll(). */
+	getLockGeneration(): number {
+		return this.lockGeneration;
 	}
 
 	/** Returns the open Kdbx database for a profile, or null if locked. */
@@ -219,7 +231,7 @@ export class UnlockSessionService {
 		if (!db) return null;
 		const entry = this.resolveEntry(db, entryPath);
 		if (!entry) return null;
-		const result: Record<string, string> = {};
+		const result = Object.create(null) as Record<string, string>;
 		for (const [key, value] of entry.fields) {
 			if (value === undefined || value === null) continue;
 			result[key] = value instanceof kdbxweb.ProtectedValue ? value.getText() : value;
@@ -254,7 +266,6 @@ export class UnlockSessionService {
 
 			for (const [key, value] of Object.entries(fields)) {
 				if (key === 'Title') continue;
-				if (!value) continue;
 				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
 					? kdbxweb.ProtectedValue.fromString(value)
 					: value;
@@ -465,7 +476,6 @@ export class UnlockSessionService {
 
 			const entry = this.resolveOrCreateEntry(db, entryPath);
 			for (const [key, value] of Object.entries(fields)) {
-				if (!value) continue;
 				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
 					? kdbxweb.ProtectedValue.fromString(value)
 					: value;
@@ -538,9 +548,9 @@ export class UnlockSessionService {
 	 * Sets the Title field to the last path segment.
 	 */
 	private resolveOrCreateEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry {
-		const segments = entryPath.split('/').filter(s => s.length > 0);
-		if (segments.length === 0) {
-			throw new Error(`Invalid entry path: "${entryPath}" — path must contain at least an entry name`);
+		const segments = entryPath.split('/');
+		if (segments.some(segment => !VALID_PATH_SEGMENT.test(segment))) {
+			throw new Error(`Invalid entry path: "${entryPath}" — each group and entry name must contain only letters, digits, hyphens, and underscores`);
 		}
 		const title = segments[segments.length - 1]!;
 		const groupSegments = segments.slice(0, -1);

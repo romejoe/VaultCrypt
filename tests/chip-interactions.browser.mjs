@@ -30,8 +30,11 @@ const {outputFiles} = await build({
     import {buildEditorExtension} from './src/editor-extension';
     import {buildChipElement} from './src/chip-component';
     import {processVcTokensInDom} from './src/inline-parser';
+    import {buildCopyTextFromSelection} from './src/clipboard-intercept';
     import {signal, tick} from '@maverick-js/signals';
     let view;
+    window.renderErrors = [];
+    window.addEventListener('error',event=>window.renderErrors.push(event.message));
     Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.copied = text;}}});
     window.logs = [];
     window.reset = (options = {}) => {
@@ -40,7 +43,19 @@ const {outputFiles} = await build({
       window.logs = [];
       const settings = {profiles: {test: {defaultField: 'Password', path: 'test.kdbx'}}, general: {compactChips: false, autoUnmask: true, saveOnBlur: false, ...options}, security: {clipboardClearSeconds: 0}};
       window.copied = null; window.saved = null; window.savedAttachment = null;
-      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => 'sample value', getEntryFields: () => ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
+      const fieldValue = signal(options.missing || options.missingField ? null : options.empty ? '' : 'sample value');
+      window.updateField = value => {fieldValue.set(value);tick();};
+      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => fieldValue(), getEntryFields: () => options.missing ? null : ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];fieldValue.set(args[3]);}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
+      window.copyChipSelection = () => {
+        const range=document.createRange();range.selectNode(document.querySelector('[data-vc-chip]'));
+        return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
+      };
+      window.copyMixedSelection = (markup,value='S',selector=null) => {
+        const container=document.createElement('div');container.innerHTML=markup;
+        container.querySelectorAll('[data-vc-chip]').forEach(chip=>{chip.dataset.vcCopyText=value;});
+        const range=document.createRange();range.selectNodeContents(selector?container.querySelector(selector):container);
+        return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
+      };
       view = new EditorView({parent: document.querySelector('#editor'), state: EditorState.create({doc: 'Before {{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}} after', extensions: [editorLivePreviewField, buildEditorExtension(plugin), EditorView.updateListener.of(update => { if (update.selectionSet) window.logs.push({event: 'CM selection', head: update.state.selection.main.head}); })]})});
       view.focus();
       tick();
@@ -79,7 +94,10 @@ const {outputFiles} = await build({
           };
         }
       }
-      export class EditSecretModal {} export class DeleteSecretModal {}
+      export class EditSecretModal {
+        constructor(app, plugin, profileId, entryPath, token) {this.reference = {profileId, entryPath, raw: token.raw};}
+        open() {window.openedEntry = this.reference;}
+      } export class DeleteSecretModal {}
     `, resolveDir: process.cwd()}));
   }}]
 });
@@ -116,6 +134,59 @@ try {
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
     }
+    for (const [markup,value,expected,selector] of [
+      ['A<span data-vc-chip>label</span><br>B','S','AS\nB'],
+      ['<p>A<span data-vc-chip>label</span></p><p>B</p>','S','AS\n\nB'],
+      ['<p>A<span data-vc-chip>label</span></p>\n<p>B</p>','S','AS\n\nB'],
+      ['<div>A<span data-vc-chip>label</span></div><div>B</div>','S','AS\nB'],
+      ['<ul><li>A<span data-vc-chip>label</span></li><li>B</li></ul>','S','AS\nB'],
+      ['<table><tr><td>A</td><td><span data-vc-chip>label</span></td><td></td></tr><tr><td>B</td><td>C</td><td>D</td></tr></table>','S','A\tS\t\nB\tC\tD'],
+      ['<table><tr><td>A</td><td><span data-vc-chip>label</span></td></tr></table>','S','A\tS','tr'],
+      ['<table><tr>\n<td>A</td>\n<td><span data-vc-chip>label</span></td>\n</tr></table>','S','A\tS','tr'],
+      ['<p><span data-vc-chip>label</span></p>','\nS\n','\nS\n'],
+      ['<pre>A\n<span data-vc-chip>label</span>\nB\n</pre>','S','A\nS\nB\n'],
+      ['<p>A<span data-vc-chip>label</span></p><p>B</p>','','A\n\nB'],
+      ['<p>plain text</p><p>without chips</p>','S',null],
+      ['<p>{{vc:test/entry}}</p><p>B</p>','S','{{vc:test/entry}}\n\nB'],
+    ]) {
+      assert.equal(await evaluate(`window.copyMixedSelection(${JSON.stringify(markup)},${JSON.stringify(value)},${JSON.stringify(selector??null)})`),expected);
+    }
+    console.log('PASS mixed-content selection preserves line, paragraph and table boundaries');
+    for (const table of [false,true]) {
+      await evaluate(`window.reset(${JSON.stringify({table})})`);await delay(50);
+      await click('[title="Edit"]');
+      await evaluate(`(()=>{const input=document.querySelector('.vaultcrypt-chip-input');input.value='saved value';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));})()`);
+      await delay(50);
+      assert.equal(await evaluate('window.saved'),'saved value');
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✅');
+      await delay(1650);
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✏️');
+      await evaluate(`window.updateField('updated after saved indicator')`);
+      assert.equal(await evaluate('document.querySelector(".vaultcrypt-chip-value").textContent'),'updated after saved indicator');
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✏️');
+      assert.deepEqual(await evaluate('window.renderErrors'),[]);
+      console.log(`PASS reactive update after saved indicator expires: table=${table}`);
+    }
+    for (const table of [false,true]) for (const compactChips of [false,true]) {
+      await evaluate(`window.reset(${JSON.stringify({table,compactChips,empty:true})})`);await delay(50);
+      assert.equal(await evaluate('document.querySelector(".vaultcrypt-chip-value").textContent'),'(empty)');
+      assert.equal(await evaluate('document.querySelector("[data-vc-chip]").dataset.vcCopyText'),'');
+      await click('[title="Copy to clipboard"]');
+      assert.equal(await evaluate('window.copied'),'');
+      if (table) assert.equal(await evaluate('window.tableActivations'),0);
+      assert.equal(await evaluate('window.copyChipSelection()'),'','copying an empty chip must not copy its display label');
+      console.log(`PASS empty field display and copy: table=${table}, compact=${compactChips}`);
+    }
+    for (const table of [false,true]) for (const compactChips of [false,true]) for (const missingField of [false,true]) {
+      await evaluate(`window.openedEntry=null;window.reset(${JSON.stringify({table,compactChips,missing:!missingField,missingField})})`);await delay(50);
+      const text = await evaluate('document.querySelector("[data-vc-chip]").textContent');
+      assert.ok(text.includes(missingField?'Field not found: test/entry#Password':'Entry not found: test/entry'));
+      assert.equal(text.includes(missingField?'Entry not found':'Field not found'),false);
+      await click(missingField?'[title="Add field"]':'[title="Create entry"]');
+      assert.deepEqual(await evaluate('window.openedEntry'),{profileId:'test',entryPath:'entry',raw:'{{vc:test/entry}}'});
+      if (table) assert.equal(await evaluate('window.tableActivations'),0);
+      console.log(`PASS missing ${missingField?'field':'entry'} action: table=${table}, compact=${compactChips}`);
+    }
     for (const table of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({table,attachment:true})})`);await delay(50);
       await click('[title="Expand preview"]');
@@ -151,11 +222,13 @@ try {
         assert.equal(await evaluate('document.activeElement.parentElement.id'),'mock-unlock');
         await evaluate(`document.querySelector('#mock-unlock').remove()`);
         assert.equal(await evaluate('!!document.querySelector(".vaultcrypt-chip-locked")'),true);
+        if (!attachment) assert.equal(await evaluate('window.copyChipSelection()'),'[locked]');
       } else {
         await dragValue();
         assert.equal(await evaluate('document.getSelection().toString()'),attachment?'sample.txt':'sample value');
         await click('[title="Copy to clipboard"]');
         assert.equal(await evaluate('window.copied'),attachment?'sample attachment':'sample value');
+        if (!attachment) assert.equal(await evaluate('window.copyChipSelection()'),'sample value');
         if (!attachment && !compactChips) {
           await dragValue();
           await click('[title="Edit"]');

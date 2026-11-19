@@ -2,6 +2,18 @@ import {VC_TOKEN_REGEX, parseVcTokens} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import type {EditorView} from '@codemirror/view';
 
+const PARAGRAPH_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'BLOCKQUOTE', 'TABLE']);
+const LINE_TAGS = new Set(['DIV', 'LI', 'UL', 'OL', 'TR']);
+const TABLE_TAGS = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR']);
+const CELL_TAGS = new Set(['TD', 'TH']);
+type CopyPiece = {text: string; boundary?: boolean};
+
+function isLayoutNode(node: Node | null): boolean {
+	if (node?.nodeType !== Node.ELEMENT_NODE) return false;
+	const tag = (node as Element).tagName;
+	return PARAGRAPH_TAGS.has(tag) || LINE_TAGS.has(tag) || TABLE_TAGS.has(tag) || CELL_TAGS.has(tag);
+}
+
 /**
  * Builds a clipboard-safe string from the current browser selection by
  * replacing VaultCrypt chip elements with their appropriate copy text
@@ -23,7 +35,12 @@ export function buildCopyTextFromSelection(
 	for (let i = 0; i < selection.rangeCount; i++) {
 		const range = selection.getRangeAt(i);
 		const fragment = range.cloneContents();
-		result += walkNode(fragment);
+		const pieces: CopyPiece[] = [];
+		walkNode(fragment, pieces);
+		// Drop only structural edges, preserving newlines inside secret values.
+		if (pieces[0]?.boundary) pieces.shift();
+		if (pieces[pieces.length - 1]?.boundary) pieces.pop();
+		result += pieces.map(piece => piece.text).join('');
 	}
 
 	if (!containsChip) return null;
@@ -31,16 +48,23 @@ export function buildCopyTextFromSelection(
 
 	// ── recursive walk ──────────────────────────────────────────────────
 
-	function walkNode(node: Node): string {
+	function boundary(pieces: CopyPiece[], text: string): void {
+		const last = pieces[pieces.length - 1];
+		if (last?.boundary) {
+			if (text.length > last.text.length) last.text = text;
+		} else {
+			pieces.push({text, boundary: true});
+		}
+	}
+
+	function walkNode(node: Node, pieces: CopyPiece[]): void {
 		// Text node — include content, with safety-net replacement of raw tokens
 		if (node.nodeType === Node.TEXT_NODE) {
 			const text = node.textContent ?? '';
 			const re = new RegExp(VC_TOKEN_REGEX.source, 'g');
-			if (!re.test(text)) return text;
-
-			// Raw {{vc:...}} tokens in text nodes — copy them literally
-			containsChip = true;
-			return text;
+			if (re.test(text)) containsChip = true;
+			pieces.push({text});
+			return;
 		}
 
 		// Element node
@@ -50,18 +74,31 @@ export function buildCopyTextFromSelection(
 			// VaultCrypt chip — use stored copy text, skip children
 			if (el.dataset.vcChip !== undefined) {
 				containsChip = true;
-				return el.dataset.vcCopyText ?? '[encrypted]';
+				pieces.push({text: el.dataset.vcCopyText ?? '[encrypted]'});
+				return;
 			}
-
-			// Recurse into children
-			let text = '';
-			for (let j = 0; j < el.childNodes.length; j++) {
-				text += walkNode(el.childNodes[j]!);
+			if (el.tagName === 'BR') {
+				pieces.push({text: '\n'});
+				return;
 			}
-			return text;
 		}
 
-		return '';
+		const tag = node.nodeType === Node.ELEMENT_NODE ? (node as Element).tagName : '';
+		const separator = PARAGRAPH_TAGS.has(tag) ? '\n\n' : LINE_TAGS.has(tag) ? '\n' : '';
+		if (separator) boundary(pieces, separator);
+		let previousCell = false;
+		for (let j = 0; j < node.childNodes.length; j++) {
+			const child = node.childNodes[j]!;
+			// Formatting whitespace between blocks isn't a rendered line break.
+			if (child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()
+				&& (TABLE_TAGS.has(tag) || (!child.parentElement?.closest('pre')
+					&& (isLayoutNode(child.previousSibling) || isLayoutNode(child.nextSibling))))) continue;
+			const cell = child.nodeType === Node.ELEMENT_NODE && CELL_TAGS.has((child as Element).tagName);
+			if (previousCell && cell) pieces.push({text: '\t'});
+			walkNode(child, pieces);
+			previousCell = cell;
+		}
+		if (separator) boundary(pieces, separator);
 	}
 }
 

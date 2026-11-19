@@ -106,6 +106,38 @@ for (const version of [3, 4]) {
 	}
 }
 
+for (const version of [3, 4]) {
+	test(`v${version} empty fields survive creation, updates and reopening`, async () => {
+		const {app} = fixture();
+		const path = '.vaultcrypt/empty.kdbx';
+		const db = new KdbxService(app);
+		await db.createDatabase(path, 'test', version, {iterations: 2, memory: 32, parallelism: 1});
+		db.closeDatabase();
+		const service = new UnlockSessionService(app);
+		const config = {path, autoLockMinutes: 0};
+		const fields = Object.fromEntries(['Password', 'UserName', 'URL', 'Notes', 'ApiKey', '__proto__'].map(key => [key, '']));
+		await service.unlockProfile('test', config, 'test');
+		await service.createEntryWithFields('test', 'Entry', fields, path);
+		service.lockAll();
+		await service.unlockProfile('test', config, 'test');
+		for (const name of Object.keys(fields)) assert.equal(service.getFieldValue('test', 'Entry', name), '');
+		await service.updateEntryFields('test', 'Entry', {Password: 'before', ApiKey: 'before', Removed: 'remove'}, path);
+		await service.updateEntryFields('test', 'Entry', fields, path);
+		await service.setFieldValue('test', 'Entry', 'Inline', '', path);
+		service.lockAll();
+		await service.unlockProfile('test', config, 'test');
+		for (const name of [...Object.keys(fields), 'Inline']) assert.equal(service.getFieldValue('test', 'Entry', name), '');
+		assert.equal(service.getFieldValue('test', 'Entry', 'Removed'), null);
+		assert.equal(service.getFieldValue('test', 'Entry', 'Title'), 'Entry');
+		assert.equal(service.getFieldValue('test', 'Entry', 'Missing'), null);
+		service.lockAll();
+		await db.openDatabase(path, 'test');
+		assert.equal(Object.prototype.hasOwnProperty.call(db.getEntry('Entry').fields, '__proto__'), true);
+		assert.equal(db.getEntry('Entry').fields.__proto__, '');
+		db.closeDatabase();
+	});
+}
+
 test('missing files fail before decryption without unlocking or writing', async () => {
 	const {app, calls} = fixture();
 	const session = new UnlockSessionService(app);

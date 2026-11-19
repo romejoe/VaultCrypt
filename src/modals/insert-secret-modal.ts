@@ -8,13 +8,12 @@ import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
 import {ATTACHMENT_PREFIX} from '../attachment-chip';
+import {VALID_TOKEN_SEGMENT} from '../inline-parser';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Characters allowed in a single path segment (group name or entry title) per inline-parser. */
 const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
-/** Characters allowed in a field name per inline-parser. */
-const VALID_FIELD_NAME = /^[a-zA-Z0-9_-]+$/;
 
 // ── Insert Secret Modal ───────────────────────────────────────────────────────
 
@@ -668,9 +667,9 @@ export class InsertSecretModal extends Modal {
 				for (const name of names) {
 					if (name === 'Title') continue;
 					// Skip fields whose names can't be represented in token syntax
-					if (!VALID_FIELD_NAME.test(name)) continue;
+					if (!VALID_TOKEN_SEGMENT.test(name) || name.startsWith(ATTACHMENT_PREFIX)) continue;
 					const val = this.plugin.sessionService.getFieldValue(profileId, this.selectedEntryPath, name);
-					if (val) options.push(name);
+					if (val !== null) options.push(name);
 				}
 			}
 			const attachmentNames = this.plugin.sessionService.getEntryAttachmentNames(profileId, this.selectedEntryPath);
@@ -681,12 +680,9 @@ export class InsertSecretModal extends Modal {
 				}
 			}
 		} else if (this.newEntryGroupPath !== null) {
-			// Always offer Password for new entries even if blank
-			options.push('Password');
-			if (this.fieldUserName) options.push('UserName');
-			if (this.fieldURL) options.push('URL');
+			options.push('Password', 'UserName', 'URL');
 			for (const cf of this.customFields) {
-				if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+				if (cf.key && !options.includes(cf.key)) options.push(cf.key);
 			}
 			for (const attachment of this.pendingAttachments) {
 				const fieldName = `${ATTACHMENT_PREFIX}${attachment.filename}`;
@@ -749,7 +745,8 @@ export class InsertSecretModal extends Modal {
 		const seen = new Set<string>();
 		for (const cf of this.customFields) {
 			if (!cf.key) return 'Custom field key cannot be empty';
-			if (!VALID_FIELD_NAME.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, and underscores`;
+			if (!VALID_TOKEN_SEGMENT.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, underscores, periods, and colons`;
+			if (cf.key.startsWith(ATTACHMENT_PREFIX)) return `"${ATTACHMENT_PREFIX}" is reserved for attachment references`;
 			if (reserved.has(cf.key)) return `"${cf.key}" is a reserved field name`;
 			if (seen.has(cf.key)) return `Duplicate custom field key: "${cf.key}"`;
 			seen.add(cf.key);
@@ -806,12 +803,13 @@ export class InsertSecretModal extends Modal {
 					return;
 				}
 
-				const fields: Record<string, string> = {};
-				if (this.fieldUserName) fields['UserName'] = this.fieldUserName;
-				if (this.fieldPassword) fields['Password'] = this.fieldPassword;
-				if (this.fieldURL) fields['URL'] = this.fieldURL;
+				const fields = Object.assign(Object.create(null) as Record<string, string>, {
+					UserName: this.fieldUserName,
+					Password: this.fieldPassword,
+					URL: this.fieldURL,
+				});
 				for (const cf of this.customFields) {
-					if (cf.key && cf.value) fields[cf.key] = cf.value;
+					if (cf.key) fields[cf.key] = cf.value;
 				}
 
 				await this.plugin.sessionService.createEntryWithFields(

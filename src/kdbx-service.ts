@@ -269,7 +269,7 @@ export class KdbxService {
 	}
 
 	private toEntryRecord(path: string, entry: kdbxweb.KdbxEntry): EntryRecord {
-		const fields: EntryFields = {};
+		const fields = Object.create(null) as EntryFields;
 		for (const [key, value] of entry.fields) {
 			fields[key] =
 				value instanceof kdbxweb.ProtectedValue ? value.getText() : value;

@@ -1,11 +1,8 @@
 import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TFile, TextComponent} from 'obsidian';
-import VaultCryptPlugin from '../main';
+import type VaultCryptPlugin from '../main';
 import {GeneratePasswordModal} from './generate-password-modal';
-import type {ParsedVcToken} from '../inline-parser';
+import {type ParsedVcToken, VALID_TOKEN_SEGMENT} from '../inline-parser';
 import {ATTACHMENT_PREFIX} from '../attachment-chip';
-
-/** Characters allowed in a field name per inline-parser. */
-const VALID_FIELD_NAME = /^[a-zA-Z0-9_-]+$/;
 
 /** Standard KeePass field names that are rendered as dedicated rows. */
 const STANDARD_FIELDS = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes']);
@@ -45,6 +42,7 @@ export class EditSecretModal extends Modal {
 	private saveBtn!: ButtonComponent;
 	private passwordTextComponent?: TextComponent;
 	private isSubmitting = false;
+	private isCreating = false;
 
 	constructor(app: App, plugin: VaultCryptPlugin, profileId: string, entryPath: string, token: ParsedVcToken) {
 		super(app);
@@ -65,12 +63,14 @@ export class EditSecretModal extends Modal {
 			return;
 		}
 
-		const fields = this.plugin.sessionService.getEntryFields(this.profileId, this.entryPath);
-		if (!fields) {
-			contentEl.createEl('p', {cls: 'mod-warning', text: 'Entry not found.'});
-			new Setting(contentEl).addButton(btn => btn.setButtonText('Close').setCta().onClick(() => this.close()));
-			return;
-		}
+		const existingFields = this.plugin.sessionService.getEntryFields(this.profileId, this.entryPath);
+		this.isCreating = existingFields === null;
+		const fields = existingFields ?? {};
+		this.titleEl.setText(`${this.isCreating ? 'Create' : 'Edit'} entry: ${this.entryPath}`);
+
+		const config = this.plugin.settings.profiles[this.profileId];
+		this.originalReferenceField = this.token.fieldName ?? config?.defaultField ?? 'Password';
+		this.referenceField = this.originalReferenceField;
 
 		// Pre-populate standard fields
 		this.fieldUserName = fields['UserName'] ?? '';
@@ -83,6 +83,12 @@ export class EditSecretModal extends Modal {
 			if (!STANDARD_FIELDS.has(key)) {
 				this.customFields.push({key, value});
 			}
+		}
+		// Make a missing custom reference editable without changing the token.
+		if (!STANDARD_FIELDS.has(this.referenceField)
+			&& !this.referenceField.startsWith(ATTACHMENT_PREFIX)
+			&& !Object.prototype.hasOwnProperty.call(fields, this.referenceField)) {
+			this.customFields.push({key: this.referenceField, value: ''});
 		}
 
 		// Load current attachment metadata (name + size)
@@ -195,12 +201,6 @@ export class EditSecretModal extends Modal {
 
 		// Reference field dropdown
 		contentEl.createEl('hr');
-
-		const config = this.plugin.settings.profiles[this.profileId];
-		const defaultField = config?.defaultField ?? 'Password';
-		this.originalReferenceField = this.token.fieldName ?? defaultField;
-		this.referenceField = this.originalReferenceField;
-
 		new Setting(contentEl)
 			.setName('Reference field')
 			.setDesc('The field this chip resolves to when revealed')
@@ -223,7 +223,7 @@ export class EditSecretModal extends Modal {
 			.addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()))
 			.addButton(btn => {
 				this.saveBtn = btn;
-				btn.setButtonText('Save').setCta()
+				btn.setButtonText(this.isCreating ? 'Create entry' : 'Save').setCta()
 					.onClick(() => {
 						this.submit().catch(e => console.error('[VaultCrypt] EditSecretModal error', e));
 					});
@@ -370,13 +370,9 @@ export class EditSecretModal extends Modal {
 		if (!dd) return;
 
 		const options: string[] = [];
-		// Always offer Password
-		options.push('Password');
-		if (this.fieldUserName) options.push('UserName');
-		if (this.fieldURL) options.push('URL');
-		if (this.fieldNotes) options.push('Notes');
+		options.push('Password', 'UserName', 'URL', 'Notes');
 		for (const cf of this.customFields) {
-			if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+			if (cf.key && !options.includes(cf.key)) options.push(cf.key);
 		}
 		for (const attachment of this.existingAttachments) {
 			if (this.toRemove.has(attachment.name)) continue;
@@ -387,6 +383,8 @@ export class EditSecretModal extends Modal {
 			const fieldName = `${ATTACHMENT_PREFIX}${pending.filename}`;
 			if (!options.includes(fieldName)) options.push(fieldName);
 		}
+		// Retain the original reference while its value or attachment is being added.
+		if (!options.includes(this.originalReferenceField)) options.push(this.originalReferenceField);
 
 		dd.selectEl.empty();
 		for (const opt of options) dd.addOption(opt, opt);
@@ -420,7 +418,8 @@ export class EditSecretModal extends Modal {
 		const seen = new Set<string>();
 		for (const cf of this.customFields) {
 			if (!cf.key) return 'Custom field key cannot be empty';
-			if (!VALID_FIELD_NAME.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, and underscores`;
+			if (!VALID_TOKEN_SEGMENT.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, underscores, periods, and colons`;
+			if (cf.key.startsWith(ATTACHMENT_PREFIX)) return `"${ATTACHMENT_PREFIX}" is reserved for attachment references`;
 			if (reserved.has(cf.key)) return `"${cf.key}" is a reserved field name`;
 			if (seen.has(cf.key)) return `Duplicate custom field key: "${cf.key}"`;
 			seen.add(cf.key);
@@ -452,21 +451,30 @@ export class EditSecretModal extends Modal {
 				return;
 			}
 
-			const fields: Record<string, string> = {};
-			if (this.fieldUserName) fields['UserName'] = this.fieldUserName;
-			if (this.fieldPassword) fields['Password'] = this.fieldPassword;
-			if (this.fieldURL) fields['URL'] = this.fieldURL;
-			if (this.fieldNotes) fields['Notes'] = this.fieldNotes;
+			const fields = Object.assign(Object.create(null) as Record<string, string>, {
+				UserName: this.fieldUserName,
+				Password: this.fieldPassword,
+				URL: this.fieldURL,
+				Notes: this.fieldNotes,
+			});
 			for (const cf of this.customFields) {
-				if (cf.key && cf.value) fields[cf.key] = cf.value;
+				if (cf.key) fields[cf.key] = cf.value;
 			}
 
-			await this.plugin.sessionService.updateEntryFields(
-				this.profileId,
-				this.entryPath,
-				fields,
-				config.path,
-			);
+			const created = this.isCreating;
+			if (created) {
+				await this.plugin.sessionService.createEntryWithFields(
+					this.profileId, this.entryPath, fields, config.path,
+				);
+				// A later failure (e.g. updating the note) must not retry creation.
+				this.isCreating = false;
+				this.titleEl.setText(`Edit entry: ${this.entryPath}`);
+				this.saveBtn.setButtonText('Save');
+			} else {
+				await this.plugin.sessionService.updateEntryFields(
+					this.profileId, this.entryPath, fields, config.path,
+				);
+			}
 
 			// Apply attachment additions/replacements first, then removals.
 			// Additions first so that a failure doesn't leave deletions already committed.
@@ -500,7 +508,7 @@ export class EditSecretModal extends Modal {
 			}
 
 			this.plugin.refreshChips();
-			new Notice('Entry updated');
+			new Notice(created ? 'Entry created' : 'Entry updated');
 			this.close();
 		} catch (e) {
 			console.error('[VaultCrypt] EditSecretModal submit error', e);

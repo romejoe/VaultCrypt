@@ -2,7 +2,7 @@ import {createRequire} from 'node:module';
 import {build} from 'esbuild';
 
 // Bundle real services in memory with only the Obsidian host replaced.
-export async function loadObsidianRuntime(contents) {
+export async function loadObsidianRuntime(contents, mocks = {}) {
 	const {outputFiles} = await build({
 		stdin: {contents, resolveDir: process.cwd()},
 		bundle: true,
@@ -12,6 +12,9 @@ export async function loadObsidianRuntime(contents) {
 		plugins: [{
 			name: 'obsidian-test-runtime',
 			setup(builder) {
+				builder.onResolve({filter: /.*/}, args => args.path in mocks
+					? {path: args.path, namespace: 'override'} : undefined);
+				builder.onLoad({filter: /.*/, namespace: 'override'}, args => ({contents: mocks[args.path]}));
 				builder.onResolve({filter: /^obsidian$/}, () => ({path: 'obsidian', namespace: 'test'}));
 				builder.onLoad({filter: /.*/, namespace: 'test'}, () => ({contents: `
 					export class TFile { constructor(path) { this.path = path; } }

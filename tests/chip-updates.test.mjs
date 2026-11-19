@@ -12,7 +12,15 @@ const mocks = {
 		export class TFile {}
 		export class TFolder {}
 		export class Notice {}
-		export class Menu {}
+		export class Menu {
+			static last; items = [];
+			constructor() { Menu.last = this; }
+			addItem(callback) {
+				const item = {setTitle(title) {this.title = title; return this;}, setIcon() {return this;}, onClick(callback) {this.click = callback; return this;}};
+				callback(item); this.items.push(item);
+			}
+			addSeparator() {} showAtMouseEvent() {}
+		}
 		export const Platform = {isDesktop: false};
 		export const editorLivePreviewField = Symbol();
 	`,
@@ -34,7 +42,11 @@ const mocks = {
 		}};
 	`,
 	'@codemirror/autocomplete': 'export const autocompletion = () => [];',
-	'./modals': 'export class UnlockModal {} export class EditSecretModal {} export class DeleteSecretModal {}',
+	'./modals': `export class UnlockModal {} export class EditSecretModal {
+		static opened = [];
+		constructor(...args) {this.args = args;}
+		open() {EditSecretModal.opened.push(this);}
+	} export class DeleteSecretModal {}`,
 	'./attachment-chip': 'export const ATTACHMENT_PREFIX = "@"; export function buildAttachmentChipElement() {}',
 	'lit-html': `
 		export const nothing = '';
@@ -61,6 +73,8 @@ const {outputFiles} = await build({
 			export {buildEditorExtension, refreshChipsEffect} from './src/editor-extension.ts';
 			export {signal, tick} from '@maverick-js/signals';
 			export {TFile} from 'obsidian';
+			export {Menu} from 'obsidian';
+			export {EditSecretModal} from './modals';
 			import kdbxweb from 'kdbxweb';
 			export const {Kdbx, KdbxCredentials, ProtectedValue} = kdbxweb;
 		`,
@@ -83,7 +97,7 @@ const {outputFiles} = await build({
 const module = {exports: {}};
 new Function('require', 'module', 'exports', outputFiles[0].text)(require, module, module.exports);
 const {UnlockSessionService, buildChipElement, CHIP_DESTROY_EVENT, parseVcTokens, buildEditorExtension, refreshChipsEffect,
-	signal, tick, TFile, Kdbx, KdbxCredentials, ProtectedValue} = module.exports;
+	signal, tick, TFile, Menu, EditSecretModal, Kdbx, KdbxCredentials, ProtectedValue} = module.exports;
 
 globalThis.document = {
 	created: 0,
@@ -119,7 +133,8 @@ function click(root, precedingText) {
 	tick();
 }
 
-async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
+async function fixture(t, {autoUnmask = true, compactChips = false, write = async () => {}} = {}) {
+	EditSecretModal.opened.length = 0;
 	const db = Kdbx.create(new KdbxCredentials(ProtectedValue.fromString('test')), 'test');
 	t.mock.method(Kdbx, 'load', async () => db);
 	t.mock.method(db, 'save', async () => new ArrayBuffer(0));
@@ -135,7 +150,7 @@ async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
 	const state = signal({profiles: [{id: 'test', isLocked: false}, {id: 'locked', isLocked: true}]});
 	const plugin = {
 		app, sessionService: service,
-		settings$: signal({profiles: {test: config, locked: config}, general: {autoUnmask, compactChips: false}}),
+		settings$: signal({profiles: {test: config, locked: config}, general: {autoUnmask, compactChips}}),
 		vaultCryptState$: state,
 	};
 	const chips = [];
@@ -150,6 +165,87 @@ async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
 	});
 	return {service, chip, state, plugin};
 }
+
+for (const compactChips of [false, true]) {
+	for (const raw of ['{{vc:test/Missing/Nested#ApiKey}}', '{{vc:test/Entry#MissingField}}']) {
+		test(`missing references open the entry form: compact=${compactChips}, ${raw}`, async t => {
+			const {chip, plugin} = await fixture(t, {compactChips});
+			const root = chip(raw);
+			assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+			const entryMissing = raw.includes('Missing/Nested');
+			assert.ok(templateText(root.template).includes(entryMissing
+				? 'Entry not found: test/Missing/Nested'
+				: 'Field not found: test/Entry#MissingField'));
+			assert.ok(templateText(root.template).includes(entryMissing ? 'Create entry' : 'Add field'));
+			assert.equal(templateText(root.template).includes(entryMissing ? 'Field not found' : 'Entry not found'), false);
+			click(root, '@click=');
+			assert.equal(EditSecretModal.opened.length, 1);
+			const [, modalPlugin, profileId, entryPath, token] = EditSecretModal.opened[0].args;
+			assert.equal(modalPlugin, plugin);
+			assert.equal(profileId, 'test');
+			assert.equal(entryPath, parseVcTokens(raw)[0].entryPath);
+			assert.equal(token.raw, raw);
+		});
+	}
+}
+
+test('missing entry, missing field and empty value update as the reference changes', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip('{{vc:test/NewEntry#ApiKey}}');
+	assert.ok(templateText(root.template).includes('Entry not found: test/NewEntry'));
+	await service.createEntryWithFields('test', 'NewEntry', {Password: 'existing'}, 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Field not found: test/NewEntry#ApiKey'));
+	assert.ok(templateText(root.template).includes('Add field'));
+	await service.setFieldValue('test', 'NewEntry', 'ApiKey', '', 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+	assert.ok(templateText(root.template).includes('(empty)'));
+	assert.equal(root.dataset.vcCopyText, '');
+	await service.updateEntryFields('test', 'NewEntry', {Password: 'existing'}, 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Field not found: test/NewEntry#ApiKey'));
+	await service.deleteEntry('test', 'NewEntry', 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Entry not found: test/NewEntry'));
+	assert.ok(templateText(root.template).includes('Create entry'));
+	assert.equal(root.dataset.vcCopyText, '[encrypted]');
+});
+
+for (const removeEntry of [false, true]) {
+	test(`cancelling an inline edit after ${removeEntry ? 'entry' : 'field'} deletion shows the correct error`, async t => {
+		const {service, chip} = await fixture(t);
+		const root = chip();
+		click(root, 'title="Edit"');
+		if (removeEntry) await service.deleteEntry('test', 'Entry', 'test.kdbx');
+		else await service.updateEntryFields('test', 'Entry', {Notes: 'remaining'}, 'test.kdbx');
+		tick();
+		handler(root.template, '@keydown=')({key: 'Escape', stopPropagation() {}, preventDefault() {}});
+		tick();
+		assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+		assert.ok(templateText(root.template).includes(removeEntry
+			? 'Entry not found: test/Entry' : 'Field not found: test/Entry#Password'));
+		assert.equal(root.dataset.vcCopyText, '[encrypted]');
+	});
+}
+
+test('context menus offer creation for missing entries and editing and deletion for existing entries', async t => {
+	const {chip} = await fixture(t);
+	for (const [raw, expected, absent] of [
+		['{{vc:test/Missing}}', 'Create entry', ['Edit entry', 'Delete entry']],
+		['{{vc:test/Entry}}', 'Edit entry', ['Create entry']],
+		['{{vc:locked/Missing}}', 'Copy reference', ['Create entry', 'Edit entry', 'Delete entry']],
+	]) {
+		chip(raw).dispatchEvent(new Event('contextmenu'));
+		const titles = Menu.last.items.map(item => item.title);
+		assert.ok(titles.includes(expected));
+		for (const title of absent) assert.equal(titles.includes(title), false);
+		if (expected !== 'Copy reference') {
+			Menu.last.items.find(item => item.title === expected).click();
+			assert.equal(EditSecretModal.opened.at(-1).args[4].raw, raw);
+		}
+	}
+});
 
 test('entry edits update every revealed reference, its display and selection-copy value', async t => {
 	const {service, chip} = await fixture(t);
@@ -225,6 +321,94 @@ test('updates leave an active inline editor intact and cancel reads the latest v
 	keydown({key: 'Escape', stopPropagation() {}, preventDefault() {}});
 	tick();
 	assert.equal(root.dataset.vcCopyText, 'updated elsewhere');
+});
+
+test('empty fields render as valid chips and remain distinct from missing fields', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip();
+	await service.updateEntryFields('test', 'Entry', {Password: ''}, 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+	assert.equal(root.dataset.vcCopyText, '');
+	assert.ok(templateText(root.template).includes('(empty)'));
+	await service.updateEntryFields('test', 'Entry', {}, 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+});
+
+test('an inline save can clear a field without deleting it', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip();
+	const duplicate = chip();
+	click(root, 'title="Edit"');
+	const input = root.template.values.find(value => value?.reference)?.reference.value;
+	input.value = '';
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), '');
+	for (const el of [root, duplicate]) {
+		assert.equal(el.dataset.vcCopyText, '');
+		assert.equal(el.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+		assert.ok(templateText(el.template).includes('(empty)'));
+	}
+});
+
+test('saved indicator expiration leaves an active edit intact', async t => {
+	const {chip} = await fixture(t);
+	const timers = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { const timer = {callback}; timers.push(timer); return timer; });
+	t.mock.method(globalThis, 'clearTimeout', () => {});
+	const root = chip();
+	click(root, 'title="Edit"');
+	root.template.values.find(value => value?.reference).reference.value.value = 'saved';
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.ok(templateText(root.template).includes('✅'));
+	click(root, 'title="Edit"');
+	const draft = root.template;
+	timers[0].callback();
+	tick();
+	assert.equal(root.template, draft);
+	handler(root.template, '@keydown=')({key: 'Escape', stopPropagation() {}, preventDefault() {}});
+	tick();
+	assert.equal(root.dataset.vcCopyText, 'saved');
+	assert.equal(templateText(root.template).includes('✅'), false);
+});
+
+test('destroying a saved chip cancels its indicator timer', async t => {
+	const {chip} = await fixture(t);
+	const timers = [], cleared = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { const timer = {callback}; timers.push(timer); return timer; });
+	t.mock.method(globalThis, 'clearTimeout', timer => { cleared.push(timer); });
+	const root = chip();
+	click(root, 'title="Edit"');
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.equal(timers.length, 1);
+	root.dispatchEvent(new Event(CHIP_DESTROY_EVENT));
+	assert.ok(cleared.includes(timers[0]));
+});
+
+test('an in-flight save finishing after chip destruction does not start an indicator timer', async t => {
+	let finish;
+	const pending = new Promise(resolve => {finish = resolve;});
+	let paused = false;
+	const {chip} = await fixture(t, {write: async () => {if (paused) await pending;}});
+	const timers = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { timers.push(callback); return 0; });
+	const root = chip();
+	click(root, 'title="Edit"');
+	paused = true;
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	root.dispatchEvent(new Event(CHIP_DESTROY_EVENT));
+	finish();
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.deepEqual(timers, []);
 });
 
 test('saving through the inline editor updates duplicate references', async t => {

@@ -6,12 +6,55 @@ The unindexed-folder cases reproduce [issue #81](https://github.com/romejoe/Vaul
 Tests also cover nested directory creation, file collisions, concurrent folder
 creation, and disk errors.
 
+Missing-reference checks cover [issue #96](https://github.com/romejoe/VaultCrypt/issues/96).
+They exercise the creation form and real session service for nested paths,
+explicit and default custom fields, existing entries, cancellation, locked
+profiles, storage failures, and concurrent creation. Chip checks verify the
+creation control in compact and expanded modes and the context menu actions.
+
+Empty-value checks cover standard and custom fields in the create, edit, and
+insert forms, reference selection, inline saves, field deletion, and chip
+display/copy behavior. Real KDBX v3/v4 saves verify that empty strings survive
+locking and reopening and remain distinct from missing fields.
+
+Auto-unlock checks cover the restored active note, switching notes, remembered
+keyring and profile passwords (including keyring-managed profiles), fallback
+after keyring failures, and disabled auto-unlock. They also check duplicate
+events, overlapping note opens, read failures, saved-password retention on
+storage errors, and cleanup during unload. Secret storage and workspace events
+use an in-memory host; no real saved credentials or vault notes are accessed.
+Further race checks pause note, keyring, and profile reads to verify that
+unload or **Lock all** prevents late unlocks and password fallback. Notices use
+the current session state when another profile finishes unlocking.
+Note checks capture the lock generation before queuing and reading. Tests
+cover stale queued/read requests, fresh requests for the same note after a
+lock, and deduplication while an older request finishes. Manual keyring tests
+pause keyring and profile decryption to verify cancellation stops the entire
+batch and its completion callback, while normal successes and partial
+password failures are counted correctly.
+
+Creation-form checks reject leading, trailing, and repeated path separators
+without writing a database or creating groups, including repeated attempts.
+
+Field-name checks cover periods, colons, and `__proto__` across both forms,
+reference selection, and real KDBX reopening. Custom field names cannot use
+the reserved `attachment:` prefix. Mixed-content browser copy checks preserve
+explicit line breaks, paragraph/list boundaries, table tabs and rows, and
+newlines within secret values, including formatted HTML between blocks.
+
 The chip-update cases reproduce [issue #59](https://github.com/romejoe/VaultCrypt/issues/59).
 They use the real session service, KDBX entry data, signals, chip templates, and
 editor widgets with DOM/template and CodeMirror mounting mocks. They cover entry
 and inline saves, duplicate references, masked/locked chips, missing fields,
 active edits, failed saves (including overlapping saves across profiles), and
 observer cleanup.
+
+The browser checks also reproduce the `lit-html` null-text-node crash after an
+inline save: let the saved checkmark expire, then update the same revealed
+chip. They verify this sequence in both CodeMirror and rendered table cells.
+Saved indicators update through signals so the renderer retains its DOM
+markers. Unit checks cover timer cleanup, saves completing after chip
+destruction, and indicator expiration during a subsequent edit.
 
 Session-mutation checks pause saves and writes to verify that each profile's
 mutations, persistence, and rollback run in order. They cover overlapping field
@@ -104,6 +147,11 @@ Do not use a production vault for file-collision or missing-directory checks.
   moves are rolled back, and configured paths remain at the original location.
 - Disable and enable the plugin repeatedly; confirm commands and chip actions
   are not duplicated and there are no console errors.
+- Enable **Auto-unlock on file open**, unlock a test profile with **Remember
+  password**, then restart with a note referencing that profile open. Confirm
+  it unlocks automatically. Lock it and switch to another note referencing it;
+  confirm it unlocks again. Repeat for a keyring-managed profile with only its
+  own password remembered, then with only the keyring password remembered.
 - Check an already-open note in live preview and reading mode, including secret
   tokens in a table. Confirm chips render, unlock, reveal, and copy as before.
 - Reveal duplicate references to a test field in both modes. Edit through
@@ -111,6 +159,15 @@ Do not use a production vault for file-collision or missing-directory checks.
   immediately, including selection-copy text and long-value tooltips. Masked
   references must stay masked. Remove and restore a field and confirm its error
   chip recovers without toggling mask/unmask.
+- Insert a token pointing to a missing nested entry. Unlock and reveal it,
+  then select **Create entry** from the chip or its context menu.
+  Confirm the form uses the token's path and field, cancellation creates nothing,
+  and saving makes every reference resolve without changing the note. Repeat
+  with **Compact chips** enabled, a custom default field, an explicit custom
+  field, and a missing field on an existing entry.
+  Confirm missing entries show **Entry not found** with **Create entry**, while
+  missing fields show **Field not found** with **Add field**. Adding an empty
+  field should clear the warning and display **(empty)** instead.
 - With **Auto unmask chips** enabled, click revealed chip padding, Edit, Copy,
   and the lock icon. Confirm the chip stays rendered and Edit opens its input.
   Repeat with **Compact chips** on and off and after manually revealing a chip.
