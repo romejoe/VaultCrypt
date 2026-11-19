@@ -1,5 +1,5 @@
 import {App} from 'obsidian';
-import {readKdbxFile, writeKdbxFile} from './kdbx-file';
+import {loadKdbxWithPassword, readKdbxFile, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 import {signal, untrack, type WriteSignal} from '@maverick-js/signals';
@@ -70,10 +70,7 @@ export class UnlockSessionService {
 		}
 		const generation = this.lockGeneration;
 		const buffer = await readKdbxFile(this.app, config.path);
-		const credentials = new kdbxweb.KdbxCredentials(
-			kdbxweb.ProtectedValue.fromString(password)
-		);
-		const db = await kdbxweb.Kdbx.load(buffer, credentials);
+		const db = await loadKdbxWithPassword(buffer, password);
 		if (generation !== this.lockGeneration) {
 			db.cleanup();
 			throw new Error('Unlock cancelled because profiles were locked.');
@@ -91,11 +88,8 @@ export class UnlockSessionService {
 	 */
 	async checkProfilePassword(config: ProfileConfig, password: string): Promise<boolean> {
 		const buffer = await readKdbxFile(this.app, config.path);
-		const credentials = new kdbxweb.KdbxCredentials(
-			kdbxweb.ProtectedValue.fromString(password)
-		);
 		try {
-			const db = await kdbxweb.Kdbx.load(buffer, credentials);
+			const db = await loadKdbxWithPassword(buffer, password);
 			db.cleanup();
 			return true;
 		} catch {

@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import {KdbxFileError, readKdbxFile, reserveKdbxCreation, writeKdbxFile} from './kdbx-file';
+import {KdbxFileError, loadKdbxWithPassword, readKdbxFile, reserveKdbxCreation, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import { Int64 } from "kdbxweb";
 import { argon2d, argon2id } from '@noble/hashes/argon2.js';
@@ -102,11 +102,8 @@ export class KdbxService {
 	}
 
 	async openDatabase(path: string, password: string): Promise<void> {
-		const credentials = new kdbxweb.KdbxCredentials(
-			kdbxweb.ProtectedValue.fromString(password)
-		);
 		const buffer = await readKdbxFile(this.app, path);
-		this.db = await kdbxweb.Kdbx.load(buffer, credentials);
+		this.db = await loadKdbxWithPassword(buffer, password);
 		this.currentPath = path;
 	}
 

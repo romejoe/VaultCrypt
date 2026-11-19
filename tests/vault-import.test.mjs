@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signal, Modal, Notice, TFile, scanForVaults} =
+const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signal, Modal, Notice, TFile, scanForVaults, kdbxweb} =
 	await loadObsidianRuntime(`
 		export { VaultImportFlow } from './src/modals/vault-import-modal.ts';
 		export { ProfileService } from './src/profile-service.ts';
 		export { KdbxService } from './src/kdbx-service.ts';
 		export { UnlockSessionService } from './src/unlock-session.ts';
 		export { scanForVaults } from './src/vault-import.ts';
+		export * as kdbxweb from 'kdbxweb';
 		export { signal } from '@maverick-js/signals';
 		export { Modal, Notice, TFile } from 'obsidian';
 	`, {obsidian: `
@@ -16,6 +17,8 @@ const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signa
 			rows = [];
 			setText(text) { this.text = text; }
 			setAttribute() {}
+			addClass() {}
+			toggleClass() {}
 			createEl() { return new Element(); }
 			empty() { this.rows = []; }
 		}
@@ -30,6 +33,7 @@ const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signa
 			onClick(click) { this.click = click; return this; }
 		}
 		export class Setting {
+			settingEl = new Element();
 			controls = [];
 			constructor(parent) { parent.rows.push(this); }
 			setName(name) { this.name = name; return this; }
@@ -81,7 +85,10 @@ function fixture(t, directory = '.private/vaults') {
 						.map(path => `${folder}/${path.slice(folder.length + 1).split('/')[0]}`);
 					return {files, folders: [...new Set(folders)]};
 				},
-				async stat(path) { return disk.has(path) ? {type: 'file'} : null; },
+				async stat(path) {
+					const file = disk.get(path);
+					return file ? {type: 'file', size: file.byteLength, ctime: 1, mtime: 1} : null;
+				},
 				async readBinary(path) {
 					reads.push(path);
 					return disk.get(path).slice(0);
@@ -110,6 +117,7 @@ function fixture(t, directory = '.private/vaults') {
 	t.after(() => cleanup.forEach(callback => callback()));
 	return {
 		app, directory, settings, disk, reads, writes, listCalls, patch, flow,
+		addProfile: service.addProfile.bind(service),
 		async makeDatabase(path, version) {
 			await kdbx.createDatabase(path, 'existing password', version, {iterations: 2, memory: 32, parallelism: 1});
 			kdbx.closeDatabase();
@@ -134,7 +142,7 @@ test('first run prompts for selected files and a later settings rescan finds cop
 	await f.start();
 	assert.equal(f.settings().general.hasScannedForVaults, true);
 	assert.deepEqual(f.settings().profiles, {});
-	const [firstRow, secondRow, actions] = Modal.current.contentEl.rows;
+	const [firstRow, firstPassword, secondRow, , actions] = Modal.current.contentEl.rows;
 	assert.equal(firstRow.name, first);
 	assert.equal(firstRow.controls[0].value, 'work-vault');
 	assert.equal(secondRow.name, second);
@@ -143,7 +151,9 @@ test('first run prompts for selected files and a later settings rescan finds cop
 	assert.equal(submit.disabled, true);
 	firstRow.controls[0].change('Restored');
 	firstRow.controls[1].change(true);
+	firstPassword.controls[0].inputEl.value = 'existing password';
 	await submit.click();
+	assert.equal(firstPassword.controls[0].inputEl.value, '');
 	assert.deepEqual(f.settings().profiles, {restored: {
 		path: first, kdbxVersion: 3, autoLockMinutes: 0, defaultField: 'password', managedByKeyring: false,
 	}});
@@ -162,9 +172,10 @@ test('first run prompts for selected files and a later settings rescan finds cop
 	assert.equal(Modal.current, undefined);
 	let settingsRefreshed = false;
 	await f.flow.open(() => { settingsRefreshed = true; });
-	const [copiedRow, remainingRow, rescanActions] = Modal.current.contentEl.rows;
+	const [copiedRow, copiedPassword, remainingRow, , rescanActions] = Modal.current.contentEl.rows;
 	assert.deepEqual([copiedRow.name, remainingRow.name], [copied, second]);
 	copiedRow.controls[1].change(true);
+	copiedPassword.controls[0].inputEl.value = 'existing password';
 	await rescanActions.controls[1].click();
 	assert.equal(settingsRefreshed, true);
 	assert.equal(f.settings().profiles['new-'].kdbxVersion, 4);
@@ -192,8 +203,8 @@ test('scan excludes registered files, keyrings, and invalid or unsupported datab
 
 test('stale and concurrent selections cannot partially import or register the same file twice', async t => {
 	const f = fixture(t);
-	const first = {name: 'one', path: `${f.directory}/first.kdbx`};
-	const gone = {name: 'two', path: `${f.directory}/gone.kdbx`};
+	const first = {name: 'one', path: `${f.directory}/first.kdbx`, password: 'existing password'};
+	const gone = {name: 'two', path: `${f.directory}/gone.kdbx`, password: 'existing password'};
 	await f.makeDatabase(first.path, 3);
 	await assert.rejects(f.importVaults([first, gone]), /file not found/);
 	assert.deepEqual(f.settings().profiles, {});
@@ -204,7 +215,85 @@ test('stale and concurrent selections cannot partially import or register the sa
 	assert.deepEqual(results.map(result => result.status).sort(), ['fulfilled', 'rejected']);
 	assert.match(results.find(result => result.status === 'rejected').reason.message, /already selected or registered/);
 	assert.equal(Object.keys(f.settings().profiles).length, 1);
-	await assert.rejects(f.importVaults([{name: 'outside', path: `${f.directory}/../other.kdbx`}]), /cannot be imported/);
+	await assert.rejects(f.importVaults([{...first, name: 'outside', path: `${f.directory}/../other.kdbx`}]), /cannot be imported/);
 	f.patch(settings => { settings.general.vaultCryptDir = 'elsewhere'; });
 	await assert.rejects(f.importVaults([first]), /storage directory is changing or has changed/);
 });
+
+test('import verifies a password alone and rejects a key-file database before registering any profiles', async t => {
+	const f = fixture(t);
+	const first = {name: 'one', path: `${f.directory}/first.kdbx`, password: 'existing password'};
+	const second = {...first, name: 'two', path: `${f.directory}/with-key.kdbx`};
+	await f.makeDatabase(first.path, 3);
+	const key = new Uint8Array(32).fill(7).buffer;
+	const credentials = new kdbxweb.KdbxCredentials(kdbxweb.ProtectedValue.fromString(second.password), key);
+	const db = kdbxweb.Kdbx.create(credentials, 'key file');
+	db.setVersion(3);
+	const bytes = await db.save();
+	f.disk.set(second.path, bytes);
+	assert.equal((await kdbxweb.Kdbx.load(bytes, credentials)).versionMajor, 3);
+
+	await assert.rejects(f.importVaults([first, second]), /with-key\.kdbx.*only credential/);
+	await assert.rejects(f.importVaults([{...first, password: 'wrong password'}]), /Check the password/);
+	assert.deepEqual(f.settings().profiles, {});
+	await f.importVaults([first]);
+	assert.equal(f.settings().profiles.one.path, first.path);
+});
+
+test('import rejects a database written by a profile creation that has yet to register its path', async t => {
+	const f = fixture(t);
+	const path = `${f.directory}/one.kdbx`;
+	let written, resume;
+	const waitingForWrite = new Promise(resolve => { written = resolve; });
+	const finishWrite = new Promise(resolve => { resume = resolve; });
+	const adapter = f.app.vault.adapter;
+	const write = adapter.writeBinary;
+	t.mock.method(adapter, 'writeBinary', async (path, data) => {
+		await write(path, data);
+		written();
+		await finishWrite;
+	});
+	const creating = f.addProfile('one', 'existing password', 3);
+	try {
+		await Promise.race([waitingForWrite, creating]);
+		assert.equal(f.disk.has(path), true);
+		assert.deepEqual(f.settings().profiles, {});
+		await assert.rejects(f.importVaults([{path, name: 'another', password: 'existing password'}]), /being created at this path/);
+	} finally {
+		resume();
+		await creating;
+	}
+	assert.deepEqual(Object.keys(f.settings().profiles), ['one']);
+});
+
+for (const change of ['removed', 'modified']) {
+	test(`import rejects the batch if an earlier file is ${change} while verifying a later file`, async t => {
+		const f = fixture(t);
+		const first = {name: 'one', path: `${f.directory}/first.kdbx`, password: 'existing password'};
+		const second = {...first, name: 'two', path: `${f.directory}/second.kdbx`};
+		await f.makeDatabase(first.path, 3);
+		await f.makeDatabase(second.path, 4);
+		const original = f.disk.get(first.path);
+		const adapter = f.app.vault.adapter;
+		const {stat, readBinary} = adapter;
+		let modified = false;
+		const statMock = t.mock.method(adapter, 'stat', async path => {
+			const info = await stat(path);
+			return modified && path === first.path ? {...info, mtime: info.mtime + 1} : info;
+		});
+		const readMock = t.mock.method(adapter, 'readBinary', path => {
+			if (path === second.path) {
+				if (change === 'removed') f.disk.delete(first.path);
+				else modified = true;
+			}
+			return readBinary(path);
+		});
+		await assert.rejects(f.importVaults([first, second]), /changed or was removed during import/);
+		assert.deepEqual(f.settings().profiles, {});
+		statMock.mock.restore();
+		readMock.mock.restore();
+		f.disk.set(first.path, original);
+		await f.importVaults([first, second]);
+		assert.deepEqual(Object.keys(f.settings().profiles), ['one', 'two']);
+	});
+}

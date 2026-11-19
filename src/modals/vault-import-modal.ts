@@ -59,7 +59,7 @@ export class VaultImportFlow {
 
 class VaultImportModal extends Modal {
 	private readonly lifetime = new AbortController();
-	private readonly selected = new Set<ImportableVault>();
+	private readonly selected = new Map<ImportableVault, HTMLInputElement>();
 	private submitting = false;
 	private submitButton!: ButtonComponent;
 	private errorEl!: HTMLParagraphElement;
@@ -78,24 +78,35 @@ class VaultImportModal extends Modal {
 		const {contentEl} = this;
 		this.titleEl.setText('Import vaults');
 		contentEl.createEl('p', {
-			text: 'Select the databases to add as profiles. Use each database’s existing password to unlock it after importing.',
+			text: 'Select the databases to import and enter their passwords. VaultCrypt supports databases that use a password alone.',
 		});
 
 		for (const candidate of this.candidates) {
-			new Setting(contentEl)
+			const row = new Setting(contentEl)
 				.setName(candidate.path)
 				.setDesc(`KDBX version ${candidate.version}`)
 				.addText(text => {
 					text.setValue(candidate.name).onChange(value => { candidate.name = value.trim(); });
 					text.inputEl.setAttribute('aria-label', `Profile name for ${candidate.path}`);
-				})
-				.addToggle(toggle => toggle
+				});
+			const passwordRow = new Setting(contentEl).setName('Database password');
+			passwordRow.settingEl.addClass('vaultcrypt-hidden');
+			passwordRow.addText(text => {
+				const input = text.inputEl;
+				input.type = 'password';
+				input.setAttribute('aria-label', `Database password for ${candidate.path}`);
+				row.addToggle(toggle => toggle
 					.setTooltip(`Import ${candidate.path}`)
 					.onChange(selected => {
-						if (selected) this.selected.add(candidate);
-						else this.selected.delete(candidate);
+						if (selected) this.selected.set(candidate, input);
+						else {
+							input.value = '';
+							this.selected.delete(candidate);
+						}
+						passwordRow.settingEl.toggleClass('vaultcrypt-hidden', !selected);
 						this.submitButton.setDisabled(this.submitting || this.selected.size === 0);
 					}));
+			});
 		}
 		this.errorEl = contentEl.createEl('p', {cls: 'mod-warning'});
 		this.errorEl.setAttribute('role', 'alert');
@@ -109,10 +120,12 @@ class VaultImportModal extends Modal {
 
 	private async submit(): Promise<void> {
 		if (this.submitting || this.selected.size === 0) return;
-		const selections: VaultImportSelection[] = Array.from(this.selected, ({path, name}) => ({path, name}));
+		const selections: VaultImportSelection[] = Array.from(this.selected, ([{path, name}, input]) => ({
+			path, name, password: input.value,
+		}));
 		const {signal} = this.lifetime;
 		this.submitting = true;
-		this.submitButton.setDisabled(true);
+		this.submitButton.setDisabled(true).setButtonText('Checking passwords...');
 		this.errorEl.setText('');
 		try {
 			await this.plugin.importVaults(this.directory, selections, signal);
@@ -120,7 +133,7 @@ class VaultImportModal extends Modal {
 			if (!signal.aborted) {
 				this.errorEl.setText(error instanceof Error ? error.message : String(error));
 				this.submitting = false;
-				this.submitButton.setDisabled(this.selected.size === 0);
+				this.submitButton.setDisabled(this.selected.size === 0).setButtonText('Import selected');
 			}
 			return;
 		}
@@ -132,6 +145,8 @@ class VaultImportModal extends Modal {
 
 	onClose(): void {
 		this.lifetime.abort();
+		for (const input of this.selected.values()) input.value = '';
+		this.selected.clear();
 		this.contentEl.empty();
 		this.onDismiss();
 	}

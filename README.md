@@ -48,7 +48,7 @@ Enable **Settings → VaultCrypt → Auto-unlock on file open** and select **Rem
 
 VaultCrypt scans its storage directory on first run and prompts you if it finds existing KeePass databases. To import databases later, copy the `.kdbx` files into the configured storage directory or a subfolder and select **Settings → VaultCrypt → Import vaults**.
 
-Select the databases you want to use, edit the suggested profile names if needed, then select **Import selected**. If your notes already reference a profile, use its previous name to reconnect those references. VaultCrypt uses each database in place. Unlock each imported profile with the database’s existing password.
+Select the databases you want to use, enter each database’s existing password, then select **Import selected**. VaultCrypt verifies that each database opens with its password alone before adding it. Databases that require a key file or another credential are unsupported. VaultCrypt uses each database in place and uses the password only to verify the import. If your notes already reference a profile, enter its previous name to reconnect those references.
 
 ## Installation
 

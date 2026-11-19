@@ -7,7 +7,7 @@ import {VaultCryptState} from './types';
 import {peek, ReadSignal} from "@maverick-js/signals";
 import {DeepReadonly} from "./utils";
 import {validateProfileName} from './profile-name';
-import {isImportableVaultPath, readVaultVersion, type VaultImportSelection} from './vault-import';
+import {checkVerifiedVaultFiles, isImportableVaultPath, verifyVaultForImport, type VaultImportSelection} from './vault-import';
 
 /**
  * Encapsulates all profile and config-file orchestration.
@@ -16,7 +16,7 @@ import {isImportableVaultPath, readVaultVersion, type VaultImportSelection} from
  */
 export class ProfileService {
 	private movingVaultDir = false;
-	private pendingProfileNames = new Set<string>();
+	private readonly pendingProfiles = new Map<string, string>();
 
 	constructor(
 		private settings: ReadSignal<DeepReadonly<VaultCryptSettings>>,
@@ -214,10 +214,13 @@ export class ProfileService {
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
 		const key = name.toLowerCase();
 		const settings = peek(this.settings);
-		const nameError = validateProfileName(key, [...Object.keys(settings.profiles), ...this.pendingProfileNames]);
+		const nameError = validateProfileName(key, [...Object.keys(settings.profiles), ...this.pendingProfiles.keys()]);
 		if (nameError) throw new Error(nameError);
 		const path = `${settings.general.vaultCryptDir}/${key}.kdbx`;
-		this.pendingProfileNames.add(key);
+		if (Object.values(settings.profiles).some(profile => profile.path === path)) {
+			throw new Error(`This file is already registered: ${path}`);
+		}
+		this.pendingProfiles.set(key, path);
 		try {
 			await this.kdbxService.createDatabase(path, password, version);
 			this.kdbxService.closeDatabase();
@@ -225,7 +228,7 @@ export class ProfileService {
 				settings.profiles[key] = profileConfig(path, version);
 			});
 		} finally {
-			this.pendingProfileNames.delete(key);
+			this.pendingProfiles.delete(key);
 		}
 	}
 
@@ -233,14 +236,17 @@ export class ProfileService {
 	async importVaults(directory: string, selections: VaultImportSelection[], signal: AbortSignal): Promise<void> {
 		this.validateVaultImport(directory, selections);
 		const imported: Record<string, ProfileConfig> = {};
-		for (const {path, name} of selections) {
+		const verified = [];
+		for (const {path, name, password} of selections) {
 			signal.throwIfAborted();
-			const version = await readVaultVersion(this.app, path);
-			if (version === null) throw new Error(`Unsupported or invalid KDBX database: ${path}`);
-			imported[name.toLowerCase()] = profileConfig(path, version);
+			const vault = await verifyVaultForImport(this.app, path, password);
+			verified.push(vault);
+			imported[name.toLowerCase()] = profileConfig(path, vault.version);
 		}
 		signal.throwIfAborted();
-		// Files and settings can change while the picker is open or while reading a header.
+		await checkVerifiedVaultFiles(this.app, verified);
+		signal.throwIfAborted();
+		// Profiles and directory settings can change while verifying the selected files.
 		this.validateVaultImport(directory, selections);
 		this.patchSettings(settings => {
 			Object.assign(settings.profiles, imported);
@@ -252,15 +258,18 @@ export class ProfileService {
 		if (this.movingVaultDir || directory !== settings.general.vaultCryptDir) {
 			throw new Error('The storage directory is changing or has changed. Scan again to import vaults.');
 		}
-		const names = [...Object.keys(settings.profiles), ...this.pendingProfileNames];
+		const names = [...Object.keys(settings.profiles), ...this.pendingProfiles.keys()];
+		const pendingPaths = new Set(this.pendingProfiles.values());
 		const paths = new Set(Object.values(settings.profiles).map(profile => profile.path));
-		for (const {name, path} of selections) {
+		for (const {name, path, password} of selections) {
 			const nameError = validateProfileName(name, names);
 			if (nameError) throw new Error(`${path}: ${nameError}`);
 			if (!isImportableVaultPath(path, directory, settings.masterKeyringPath)) {
 				throw new Error(`This file cannot be imported: ${path}`);
 			}
+			if (pendingPaths.has(path)) throw new Error(`A profile is being created at this path: ${path}`);
 			if (paths.has(path)) throw new Error(`This file is already selected or registered: ${path}`);
+			if (!password) throw new Error(`Enter the database password for ${path}.`);
 			names.push(name);
 			paths.add(path);
 		}
@@ -297,7 +306,7 @@ export class ProfileService {
 		const settings = peek(this.settings);
 		if (!settings.profiles[oldKey]) throw new Error(`Profile '${oldName}' not found.`);
 		if (oldKey === newKey) return;
-		const nameError = validateProfileName(newKey, [...Object.keys(settings.profiles), ...this.pendingProfileNames]);
+		const nameError = validateProfileName(newKey, [...Object.keys(settings.profiles), ...this.pendingProfiles.keys()]);
 		if (nameError) throw new Error(nameError);
 
 		this.patchSettings((newSettings: VaultCryptSettings) => {

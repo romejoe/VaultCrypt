@@ -1,18 +1,25 @@
-import type {App} from 'obsidian';
+import type {App, Stat} from 'obsidian';
 import {BinaryStream, Kdbx, KdbxContext, KdbxHeader} from 'kdbxweb';
-import {readKdbxFile} from './kdbx-file';
+import {KdbxFileError, loadKdbxWithPassword, readKdbxFile} from './kdbx-file';
 import type {KdbxVersion} from './kdbx-service';
 import {MAX_PROFILE_NAME_LENGTH} from './profile-name';
 import type {VaultCryptSettings} from './settings';
 import type {DeepReadonly} from './utils';
 
-export interface VaultImportSelection {
+export interface ImportableVault {
 	path: string;
 	name: string;
+	version: KdbxVersion;
 }
 
-export interface ImportableVault extends VaultImportSelection {
+export interface VaultImportSelection extends Pick<ImportableVault, 'path' | 'name'> {
+	password: string;
+}
+
+interface VerifiedVault {
+	path: string;
 	version: KdbxVersion;
+	stat: Stat;
 }
 
 function isDescendant(path: string, directory: string): boolean {
@@ -29,7 +36,7 @@ export function isImportableVaultPath(path: string, directory: string, keyringPa
 }
 
 /** Read the public KDBX header without unlocking or modifying the database. */
-export async function readVaultVersion(app: App, path: string): Promise<KdbxVersion | null> {
+async function readVaultVersion(app: App, path: string): Promise<KdbxVersion | null> {
 	const buffer = await readKdbxFile(app, path);
 	try {
 		const stream = new BinaryStream(buffer);
@@ -41,6 +48,31 @@ export async function readVaultVersion(app: App, path: string): Promise<KdbxVers
 	return null;
 }
 
+export async function verifyVaultForImport(app: App, path: string, password: string): Promise<VerifiedVault> {
+	const stat = await app.vault.adapter.stat(path);
+	if (stat?.type !== 'file') throw new KdbxFileError(`KDBX file not found: ${path}`);
+	const buffer = await readKdbxFile(app, path);
+	let db: Kdbx;
+	try {
+		db = await loadKdbxWithPassword(buffer, password);
+	} catch {
+		throw new Error(`Could not open ${path}. Check the password and confirm that it is the database's only credential.`);
+	}
+	const {versionMajor: version} = db;
+	db.cleanup();
+	if (version !== 3 && version !== 4) throw new Error(`Unsupported KDBX version: ${path}`);
+	return {path, version, stat};
+}
+
+export async function checkVerifiedVaultFiles(app: App, files: VerifiedVault[]): Promise<void> {
+	await Promise.all(files.map(async ({path, stat}) => {
+		const current = await app.vault.adapter.stat(path);
+		if (current?.type !== 'file' || current.ctime !== stat.ctime || current.mtime !== stat.mtime || current.size !== stat.size) {
+			throw new KdbxFileError(`Database file changed or was removed during import: ${path}`);
+		}
+	}));
+}
+
 export async function scanForVaults(app: App, settings: DeepReadonly<VaultCryptSettings>, signal: AbortSignal) {
 	const directory = settings.general.vaultCryptDir;
 	const registered = new Set(Object.values(settings.profiles).map(profile => profile.path));
@@ -49,10 +81,10 @@ export async function scanForVaults(app: App, settings: DeepReadonly<VaultCryptS
 	for (const folder of folders) {
 		signal.throwIfAborted();
 		const listing = await app.vault.adapter.list(folder);
-		for (const child of listing.folders) {
+		for (const child of listing.folders.sort(comparePaths)) {
 			if (isDescendant(child, directory)) folders.add(child);
 		}
-		for (const path of listing.files) {
+		for (const path of listing.files.sort(comparePaths)) {
 			if (!registered.has(path) && isImportableVaultPath(path, directory, settings.masterKeyringPath)) paths.add(path);
 		}
 	}
@@ -60,7 +92,7 @@ export async function scanForVaults(app: App, settings: DeepReadonly<VaultCryptS
 	const candidates: ImportableVault[] = [];
 	const usedNames = new Set(Object.keys(settings.profiles).map(name => name.toLowerCase()));
 	let unreadable = 0;
-	for (const path of [...paths].sort()) {
+	for (const path of paths) {
 		signal.throwIfAborted();
 		const version = await readVaultVersion(app, path).catch(() => {
 			unreadable++;
@@ -72,6 +104,10 @@ export async function scanForVaults(app: App, settings: DeepReadonly<VaultCryptS
 		candidates.push({path, name, version});
 	}
 	return {directory, candidates, unreadable};
+}
+
+function comparePaths(left: string, right: string): number {
+	return left.localeCompare(right);
 }
 
 function suggestProfileName(path: string, usedNames: Set<string>): string {
