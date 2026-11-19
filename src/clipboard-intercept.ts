@@ -53,15 +53,14 @@ export function buildCopyTextFromSelection(
 				return el.dataset.vcCopyText ?? '[encrypted]';
 			}
 
-			// Recurse into children
-			let text = '';
-			for (let j = 0; j < el.childNodes.length; j++) {
-				text += walkNode(el.childNodes[j]!);
-			}
-			return text;
 		}
 
-		return '';
+		// cloneContents() returns a DocumentFragment; walk that container too.
+		let text = '';
+		for (let j = 0; j < node.childNodes.length; j++) {
+			text += walkNode(node.childNodes[j]!);
+		}
+		return text;
 	}
 }
 

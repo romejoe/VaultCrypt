@@ -2,16 +2,21 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {EditSecretModal, UnlockSessionService, parseVcTokens, Setting, Notice, TFile, kdbxweb} =
+const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, Setting, Notice, TFile, kdbxweb, signal, tick} =
 	await loadObsidianRuntime(`
 		export {EditSecretModal} from './src/modals/edit-secret-modal.ts';
+		export {InsertSecretModal} from './src/modals/insert-secret-modal.ts';
 		export {UnlockSessionService} from './src/unlock-session.ts';
 		export {parseVcTokens} from './src/inline-parser.ts';
 		export {Setting, Notice, TFile} from 'obsidian';
 		export * as kdbxweb from 'kdbxweb';
+		export {signal, tick} from '@maverick-js/signals';
 	`, {
 		'../attachment-chip': `export const ATTACHMENT_PREFIX = 'attachment:';`,
 		'./generate-password-modal': 'export class GeneratePasswordModal {}',
+		'./unlock-modal': 'export class UnlockModal {}',
+		'lit-html': 'export const html = (strings, ...values) => ({strings, values}); export const nothing = ""; export const render = () => {};',
+		'lit-html/directives/ref.js': 'export const ref = () => {};',
 		obsidian: `
 			class Element {
 				children = []; textContent = ''; classes = new Set();
@@ -27,7 +32,7 @@ const {EditSecretModal, UnlockSessionService, parseVcTokens, Setting, Notice, TF
 				removeClass(cls) { this.classes.delete(cls); }
 			}
 			class Control {
-				inputEl = {}; selectEl = new Element(); value = ''; options = {};
+				inputEl = {}; selectEl = {empty: () => {this.options = {};}}; value = ''; options = {};
 				setValue(value) { this.value = value; return this; }
 				setPlaceholder() { return this; }
 				setDisabled(value) { this.disabled = value; return this; }
@@ -55,6 +60,7 @@ const {EditSecretModal, UnlockSessionService, parseVcTokens, Setting, Notice, TF
 				open() { this.onOpen(); }
 				close() { this.closed = true; this.onClose(); }
 			}
+			export class ButtonComponent extends Control {}
 			export class Notice {
 				static messages = [];
 				constructor(message) { Notice.messages.push(message); }
@@ -88,13 +94,83 @@ async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultFie
 	const token = parseVcTokens(raw)[0];
 	if (existing) await service.createEntryWithFields('test', token.entryPath, existing, config.path);
 	writes = 0;
-	const plugin = {sessionService: service, settings: {profiles: {test: config}}, refreshChips() { this.refreshes++; }, refreshes: 0};
+	const plugin = {sessionService: service, settings: {profiles: {test: config}, general: {defaultProfile: ''}},
+		vaultCryptState$: signal({profiles: [{id: 'test', isLocked: false}]}),
+		refreshChips() { this.refreshes++; }, refreshes: 0};
 	const modal = new EditSecretModal(app, plugin, 'test', token.entryPath, token);
 	modal.open();
 	const row = name => Setting.instances.find(setting => setting.name === name);
 	const edit = (name, value) => row(name).controls[0].change(value);
-	return {modal, service, app, db, plugin, row, edit, token, writes: () => writes, note: () => note};
+	const inserted = [];
+	const openInsert = () => {
+		modal.close();
+		Setting.instances.length = 0;
+		const insert = new InsertSecretModal(app, plugin, {getCursor: () => ({line: 0, ch: 0}), replaceRange: text => inserted.push(text)});
+		insert.open();
+		tick();
+		t.after(() => insert.close());
+		return insert;
+	};
+	return {modal, service, app, db, plugin, row, edit, token, openInsert, inserted, writes: () => writes, note: () => note};
 }
+
+test('creation keeps blank standard and custom fields and their selected reference', async t => {
+	const f = await fixture(t, {raw: '{{vc:test/Entry#ApiKey}}'});
+	const dropdown = f.row('Reference field').controls[0];
+	assert.equal(dropdown.value, 'ApiKey');
+	for (const name of ['Password', 'UserName', 'URL', 'Notes', 'ApiKey']) assert.ok(name in dropdown.options);
+	await f.modal.submit();
+	for (const name of ['Password', 'UserName', 'URL', 'Notes', 'ApiKey']) {
+		assert.equal(f.service.getFieldValue('test', 'Entry', name), '');
+		assert.ok(f.service.getEntryFieldNames('test', 'Entry').includes(name));
+	}
+	assert.equal(f.note(), f.token.raw);
+});
+
+test('clearing existing fields saves empty strings while removing a custom row deletes that field', async t => {
+	const f = await fixture(t, {raw: '{{vc:test/Entry#ApiKey}}', existing: {
+		Password: 'before', UserName: 'user', URL: 'url', Notes: 'notes', ApiKey: 'key', Removed: 'remove',
+	}});
+	for (const name of ['Password', 'Username', 'URL', 'Notes']) f.edit(name, '');
+	const custom = Setting.instances.find(row => row.controls[0]?.value === 'ApiKey');
+	custom.controls[1].change('');
+	const removed = Setting.instances.find(row => row.controls[0]?.value === 'Removed');
+	removed.controls[2].click();
+	assert.equal(f.row('Reference field').controls[0].value, 'ApiKey');
+	await f.modal.submit();
+	for (const name of ['Password', 'UserName', 'URL', 'Notes', 'ApiKey']) assert.equal(f.service.getFieldValue('test', 'Entry', name), '');
+	assert.equal(f.service.getFieldValue('test', 'Entry', 'Removed'), null);
+	assert.equal(f.note(), f.token.raw);
+});
+
+test('insert form offers and saves named custom fields with empty values', async t => {
+	const f = await fixture(t);
+	const insert = f.openInsert();
+	insert.selectNewEntry('Group');
+	f.edit('Entry name (required)', 'Blank');
+	Setting.instances.flatMap(row => row.controls).find(control => control.text === 'Add custom field').click();
+	const custom = Setting.instances.find(row => row.parent === insert.customFieldsContainerEl);
+	custom.controls[0].change('ApiKey');
+	const dropdown = f.row('Reference field').controls[0];
+	assert.ok('ApiKey' in dropdown.options);
+	dropdown.change('ApiKey');
+	await insert.submit();
+	assert.equal(insert.closed, true);
+	assert.deepEqual(f.inserted, ['{{vc:test/Group/Blank#ApiKey}}']);
+	for (const name of ['Password', 'UserName', 'URL', 'ApiKey']) assert.equal(f.service.getFieldValue('test', 'Group/Blank', name), '');
+});
+
+test('insert form offers empty fields on existing entries', async t => {
+	const f = await fixture(t, {raw: '{{vc:test/Entry}}', existing: {Password: '', UserName: '', ApiKey: ''}});
+	const insert = f.openInsert();
+	insert.selectEntry('Entry');
+	const dropdown = f.row('Reference field').controls[0];
+	for (const name of ['Password', 'UserName', 'ApiKey']) assert.ok(name in dropdown.options);
+	dropdown.change('ApiKey');
+	await insert.submit();
+	assert.deepEqual(f.inserted, ['{{vc:test/Entry#ApiKey}}']);
+	assert.equal(f.writes(), 0);
+});
 
 for (const options of [
 	{},

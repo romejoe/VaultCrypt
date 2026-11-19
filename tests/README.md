@@ -12,6 +12,11 @@ explicit and default custom fields, existing entries, cancellation, locked
 profiles, storage failures, and concurrent creation. Chip checks verify the
 creation control in compact and expanded modes and the context menu actions.
 
+Empty-value checks cover standard and custom fields in the create, edit, and
+insert forms, reference selection, inline saves, field deletion, and chip
+display/copy behavior. Real KDBX v3/v4 saves verify that empty strings survive
+locking and reopening and remain distinct from missing fields.
+
 Auto-unlock checks cover the restored active note, switching notes, remembered
 keyring and profile passwords (including keyring-managed profiles), fallback
 after keyring failures, and disabled auto-unlock. They also check duplicate
@@ -130,11 +135,14 @@ Do not use a production vault for file-collision or missing-directory checks.
   references must stay masked. Remove and restore a field and confirm its error
   chip recovers without toggling mask/unmask.
 - Insert a token pointing to a missing nested entry. Unlock and reveal it,
-  then select **Create and edit** or right-click and select **Create entry**.
+  then select **Create entry** from the chip or its context menu.
   Confirm the form uses the token's path and field, cancellation creates nothing,
   and saving makes every reference resolve without changing the note. Repeat
   with **Compact chips** enabled, a custom default field, an explicit custom
   field, and a missing field on an existing entry.
+  Confirm missing entries show **Entry not found** with **Create entry**, while
+  missing fields show **Field not found** with **Add field**. Adding an empty
+  field should clear the warning and display **(empty)** instead.
 - With **Auto unmask chips** enabled, click revealed chip padding, Edit, Copy,
   and the lock icon. Confirm the chip stays rendered and Edit opens its input.
   Repeat with **Compact chips** on and off and after manually revealing a chip.

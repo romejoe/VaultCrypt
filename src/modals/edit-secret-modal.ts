@@ -370,13 +370,9 @@ export class EditSecretModal extends Modal {
 		if (!dd) return;
 
 		const options: string[] = [];
-		// Always offer Password
-		options.push('Password');
-		if (this.fieldUserName) options.push('UserName');
-		if (this.fieldURL) options.push('URL');
-		if (this.fieldNotes) options.push('Notes');
+		options.push('Password', 'UserName', 'URL', 'Notes');
 		for (const cf of this.customFields) {
-			if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+			if (cf.key && !options.includes(cf.key)) options.push(cf.key);
 		}
 		for (const attachment of this.existingAttachments) {
 			if (this.toRemove.has(attachment.name)) continue;
@@ -454,13 +450,14 @@ export class EditSecretModal extends Modal {
 				return;
 			}
 
-			const fields: Record<string, string> = {};
-			if (this.fieldUserName) fields['UserName'] = this.fieldUserName;
-			if (this.fieldPassword) fields['Password'] = this.fieldPassword;
-			if (this.fieldURL) fields['URL'] = this.fieldURL;
-			if (this.fieldNotes) fields['Notes'] = this.fieldNotes;
+			const fields: Record<string, string> = {
+				UserName: this.fieldUserName,
+				Password: this.fieldPassword,
+				URL: this.fieldURL,
+				Notes: this.fieldNotes,
+			};
 			for (const cf of this.customFields) {
-				if (cf.key && cf.value) fields[cf.key] = cf.value;
+				if (cf.key) fields[cf.key] = cf.value;
 			}
 
 			const created = this.isCreating;

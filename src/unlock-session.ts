@@ -254,7 +254,6 @@ export class UnlockSessionService {
 
 			for (const [key, value] of Object.entries(fields)) {
 				if (key === 'Title') continue;
-				if (!value) continue;
 				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
 					? kdbxweb.ProtectedValue.fromString(value)
 					: value;
@@ -465,7 +464,6 @@ export class UnlockSessionService {
 
 			const entry = this.resolveOrCreateEntry(db, entryPath);
 			for (const [key, value] of Object.entries(fields)) {
-				if (!value) continue;
 				const fieldValue: kdbxweb.KdbxEntryField = PROTECTED_FIELDS.has(key)
 					? kdbxweb.ProtectedValue.fromString(value)
 					: value;

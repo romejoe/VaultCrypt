@@ -670,7 +670,7 @@ export class InsertSecretModal extends Modal {
 					// Skip fields whose names can't be represented in token syntax
 					if (!VALID_FIELD_NAME.test(name)) continue;
 					const val = this.plugin.sessionService.getFieldValue(profileId, this.selectedEntryPath, name);
-					if (val) options.push(name);
+					if (val !== null) options.push(name);
 				}
 			}
 			const attachmentNames = this.plugin.sessionService.getEntryAttachmentNames(profileId, this.selectedEntryPath);
@@ -681,12 +681,9 @@ export class InsertSecretModal extends Modal {
 				}
 			}
 		} else if (this.newEntryGroupPath !== null) {
-			// Always offer Password for new entries even if blank
-			options.push('Password');
-			if (this.fieldUserName) options.push('UserName');
-			if (this.fieldURL) options.push('URL');
+			options.push('Password', 'UserName', 'URL');
 			for (const cf of this.customFields) {
-				if (cf.key && cf.value && !options.includes(cf.key)) options.push(cf.key);
+				if (cf.key && !options.includes(cf.key)) options.push(cf.key);
 			}
 			for (const attachment of this.pendingAttachments) {
 				const fieldName = `${ATTACHMENT_PREFIX}${attachment.filename}`;
@@ -806,12 +803,13 @@ export class InsertSecretModal extends Modal {
 					return;
 				}
 
-				const fields: Record<string, string> = {};
-				if (this.fieldUserName) fields['UserName'] = this.fieldUserName;
-				if (this.fieldPassword) fields['Password'] = this.fieldPassword;
-				if (this.fieldURL) fields['URL'] = this.fieldURL;
+				const fields: Record<string, string> = {
+					UserName: this.fieldUserName,
+					Password: this.fieldPassword,
+					URL: this.fieldURL,
+				};
 				for (const cf of this.customFields) {
-					if (cf.key && cf.value) fields[cf.key] = cf.value;
+					if (cf.key) fields[cf.key] = cf.value;
 				}
 
 				await this.plugin.sessionService.createEntryWithFields(

@@ -67,7 +67,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 
 
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
-	const errorReason = signal<string>('');
 	const justSaved = signal(false);
 
 	/**
@@ -235,9 +234,8 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 				if (peek(editState) !== null) return;
 				const value = plugin.sessionService?.getFieldValue(profileId, token.entryPath, field());
 				if (value === null || value === undefined) {
-					errorReason.set(`Entry or field not found: ${peek(tooltipPath)}`);
 					chipState.set('masked-error');
-					renderMaskedError(peek(errorReason));
+					renderMaskedError();
 
 				} else {
 					chipState.set('revealed');
@@ -264,8 +262,9 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					if (value !== null && value !== undefined) {
 						chipState.set('revealed');
 						renderRevealed(value);
-					} else if (currentState === 'masked-error') {
-						renderMaskedError(peek(errorReason));
+					} else {
+						chipState.set('masked-error');
+						renderMaskedError();
 					}
 				}
 			}
@@ -313,13 +312,18 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		`, root);
 	}
 
-	function renderMaskedError(reason: string) {
+	function renderMaskedError() {
+		const entryExists = plugin.sessionService?.getEntryFields(profileId, token.entryPath) != null;
+		const reason = entryExists
+			? `Field not found: ${peek(tooltipPath)}`
+			: `Entry not found: ${profileId}/${token.entryPath}`;
+		const action = entryExists ? 'Add field' : 'Create entry';
 		root.className = 'vaultcrypt-chip vaultcrypt-chip-masked-error';
 		root.dataset.vcCopyText = '[encrypted]';
 		render(html`
 			<span class="vaultcrypt-chip-icon">⚠</span>
 			<span>${reason}</span>
-			<button class="vaultcrypt-chip-btn" title="Create and edit"
+			<button class="vaultcrypt-chip-btn" title=${action} aria-label=${action}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
 					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
@@ -355,7 +359,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					chipState.set('masked');
 				}}>🔓</span>
 			<span class="vaultcrypt-chip-value"
-				title=${isTruncated ? value : nothing}>${display}</span>
+				title=${isTruncated ? value : nothing}>${value === '' ? '(empty)' : display}</span>
 			${!compact() ? html`
 				<button ${ref(editBtnRef)}
 					class=${showSaved ? 'vaultcrypt-chip-btn vaultcrypt-chip-btn-saved' : 'vaultcrypt-chip-btn'}

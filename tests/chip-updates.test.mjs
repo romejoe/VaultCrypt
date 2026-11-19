@@ -172,7 +172,13 @@ for (const compactChips of [false, true]) {
 			const {chip, plugin} = await fixture(t, {compactChips});
 			const root = chip(raw);
 			assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
-			click(root, 'title="Create and edit"');
+			const entryMissing = raw.includes('Missing/Nested');
+			assert.ok(templateText(root.template).includes(entryMissing
+				? 'Entry not found: test/Missing/Nested'
+				: 'Field not found: test/Entry#MissingField'));
+			assert.ok(templateText(root.template).includes(entryMissing ? 'Create entry' : 'Add field'));
+			assert.equal(templateText(root.template).includes(entryMissing ? 'Field not found' : 'Entry not found'), false);
+			click(root, '@click=');
 			assert.equal(EditSecretModal.opened.length, 1);
 			const [, modalPlugin, profileId, entryPath, token] = EditSecretModal.opened[0].args;
 			assert.equal(modalPlugin, plugin);
@@ -181,6 +187,46 @@ for (const compactChips of [false, true]) {
 			assert.equal(token.raw, raw);
 		});
 	}
+}
+
+test('missing entry, missing field and empty value update as the reference changes', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip('{{vc:test/NewEntry#ApiKey}}');
+	assert.ok(templateText(root.template).includes('Entry not found: test/NewEntry'));
+	await service.createEntryWithFields('test', 'NewEntry', {Password: 'existing'}, 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Field not found: test/NewEntry#ApiKey'));
+	assert.ok(templateText(root.template).includes('Add field'));
+	await service.setFieldValue('test', 'NewEntry', 'ApiKey', '', 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+	assert.ok(templateText(root.template).includes('(empty)'));
+	assert.equal(root.dataset.vcCopyText, '');
+	await service.updateEntryFields('test', 'NewEntry', {Password: 'existing'}, 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Field not found: test/NewEntry#ApiKey'));
+	await service.deleteEntry('test', 'NewEntry', 'test.kdbx');
+	tick();
+	assert.ok(templateText(root.template).includes('Entry not found: test/NewEntry'));
+	assert.ok(templateText(root.template).includes('Create entry'));
+	assert.equal(root.dataset.vcCopyText, '[encrypted]');
+});
+
+for (const removeEntry of [false, true]) {
+	test(`cancelling an inline edit after ${removeEntry ? 'entry' : 'field'} deletion shows the correct error`, async t => {
+		const {service, chip} = await fixture(t);
+		const root = chip();
+		click(root, 'title="Edit"');
+		if (removeEntry) await service.deleteEntry('test', 'Entry', 'test.kdbx');
+		else await service.updateEntryFields('test', 'Entry', {Notes: 'remaining'}, 'test.kdbx');
+		tick();
+		handler(root.template, '@keydown=')({key: 'Escape', stopPropagation() {}, preventDefault() {}});
+		tick();
+		assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+		assert.ok(templateText(root.template).includes(removeEntry
+			? 'Entry not found: test/Entry' : 'Field not found: test/Entry#Password'));
+		assert.equal(root.dataset.vcCopyText, '[encrypted]');
+	});
 }
 
 test('context menus offer creation for missing entries and editing and deletion for existing entries', async t => {
@@ -275,6 +321,37 @@ test('updates leave an active inline editor intact and cancel reads the latest v
 	keydown({key: 'Escape', stopPropagation() {}, preventDefault() {}});
 	tick();
 	assert.equal(root.dataset.vcCopyText, 'updated elsewhere');
+});
+
+test('empty fields render as valid chips and remain distinct from missing fields', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip();
+	await service.updateEntryFields('test', 'Entry', {Password: ''}, 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+	assert.equal(root.dataset.vcCopyText, '');
+	assert.ok(templateText(root.template).includes('(empty)'));
+	await service.updateEntryFields('test', 'Entry', {}, 'test.kdbx');
+	tick();
+	assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+});
+
+test('an inline save can clear a field without deleting it', async t => {
+	const {service, chip} = await fixture(t);
+	const root = chip();
+	const duplicate = chip();
+	click(root, 'title="Edit"');
+	const input = root.template.values.find(value => value?.reference)?.reference.value;
+	input.value = '';
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.equal(service.getFieldValue('test', 'Entry', 'Password'), '');
+	for (const el of [root, duplicate]) {
+		assert.equal(el.dataset.vcCopyText, '');
+		assert.equal(el.className, 'vaultcrypt-chip vaultcrypt-chip-revealed');
+		assert.ok(templateText(el.template).includes('(empty)'));
+	}
 });
 
 test('saving through the inline editor updates duplicate references', async t => {
