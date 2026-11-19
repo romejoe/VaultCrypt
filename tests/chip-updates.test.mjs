@@ -354,6 +354,63 @@ test('an inline save can clear a field without deleting it', async t => {
 	}
 });
 
+test('saved indicator expiration leaves an active edit intact', async t => {
+	const {chip} = await fixture(t);
+	const timers = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { const timer = {callback}; timers.push(timer); return timer; });
+	t.mock.method(globalThis, 'clearTimeout', () => {});
+	const root = chip();
+	click(root, 'title="Edit"');
+	root.template.values.find(value => value?.reference).reference.value.value = 'saved';
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.ok(templateText(root.template).includes('✅'));
+	click(root, 'title="Edit"');
+	const draft = root.template;
+	timers[0].callback();
+	tick();
+	assert.equal(root.template, draft);
+	handler(root.template, '@keydown=')({key: 'Escape', stopPropagation() {}, preventDefault() {}});
+	tick();
+	assert.equal(root.dataset.vcCopyText, 'saved');
+	assert.equal(templateText(root.template).includes('✅'), false);
+});
+
+test('destroying a saved chip cancels its indicator timer', async t => {
+	const {chip} = await fixture(t);
+	const timers = [], cleared = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { const timer = {callback}; timers.push(timer); return timer; });
+	t.mock.method(globalThis, 'clearTimeout', timer => { cleared.push(timer); });
+	const root = chip();
+	click(root, 'title="Edit"');
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.equal(timers.length, 1);
+	root.dispatchEvent(new Event(CHIP_DESTROY_EVENT));
+	assert.ok(cleared.includes(timers[0]));
+});
+
+test('an in-flight save finishing after chip destruction does not start an indicator timer', async t => {
+	let finish;
+	const pending = new Promise(resolve => {finish = resolve;});
+	let paused = false;
+	const {chip} = await fixture(t, {write: async () => {if (paused) await pending;}});
+	const timers = [];
+	t.mock.method(globalThis, 'setTimeout', callback => { timers.push(callback); return 0; });
+	const root = chip();
+	click(root, 'title="Edit"');
+	paused = true;
+	handler(root.template, '@keydown=')({key: 'Enter', stopPropagation() {}, preventDefault() {}});
+	await new Promise(resolve => setImmediate(resolve));
+	root.dispatchEvent(new Event(CHIP_DESTROY_EVENT));
+	finish();
+	await new Promise(resolve => setImmediate(resolve));
+	tick();
+	assert.deepEqual(timers, []);
+});
+
 test('saving through the inline editor updates duplicate references', async t => {
 	const {service, chip} = await fixture(t);
 	const root = chip();

@@ -31,6 +31,13 @@ and inline saves, duplicate references, masked/locked chips, missing fields,
 active edits, failed saves (including overlapping saves across profiles), and
 observer cleanup.
 
+The browser checks also reproduce the `lit-html` null-text-node crash after an
+inline save: let the saved checkmark expire, then update the same revealed
+chip. They verify this sequence in both CodeMirror and rendered table cells.
+Saved indicators update through signals so the renderer retains its DOM
+markers. Unit checks cover timer cleanup, saves completing after chip
+destruction, and indicator expiration during a subsequent edit.
+
 Session-mutation checks pause saves and writes to verify that each profile's
 mutations, persistence, and rollback run in order. They cover overlapping field
 edits with a failed save, later persistence of the successful value, entry and

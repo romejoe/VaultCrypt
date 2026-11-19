@@ -33,6 +33,8 @@ const {outputFiles} = await build({
     import {buildCopyTextFromSelection} from './src/clipboard-intercept';
     import {signal, tick} from '@maverick-js/signals';
     let view;
+    window.renderErrors = [];
+    window.addEventListener('error',event=>window.renderErrors.push(event.message));
     Object.defineProperty(navigator, 'clipboard', {value: {writeText: async text => {window.copied = text;}}});
     window.logs = [];
     window.reset = (options = {}) => {
@@ -41,7 +43,9 @@ const {outputFiles} = await build({
       window.logs = [];
       const settings = {profiles: {test: {defaultField: 'Password', path: 'test.kdbx'}}, general: {compactChips: false, autoUnmask: true, saveOnBlur: false, ...options}, security: {clipboardClearSeconds: 0}};
       window.copied = null; window.saved = null; window.savedAttachment = null;
-      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => options.missing || options.missingField ? null : options.empty ? '' : 'sample value', getEntryFields: () => options.missing ? null : ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
+      const fieldValue = signal(options.missing || options.missingField ? null : options.empty ? '' : 'sample value');
+      window.updateField = value => {fieldValue.set(value);tick();};
+      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => fieldValue(), getEntryFields: () => options.missing ? null : ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];fieldValue.set(args[3]);}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
       window.copyChipSelection = () => {
         const range=document.createRange();range.selectNode(document.querySelector('[data-vc-chip]'));
         return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
@@ -123,6 +127,21 @@ try {
       await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
+    }
+    for (const table of [false,true]) {
+      await evaluate(`window.reset(${JSON.stringify({table})})`);await delay(50);
+      await click('[title="Edit"]');
+      await evaluate(`(()=>{const input=document.querySelector('.vaultcrypt-chip-input');input.value='saved value';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));})()`);
+      await delay(50);
+      assert.equal(await evaluate('window.saved'),'saved value');
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✅');
+      await delay(1650);
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✏️');
+      await evaluate(`window.updateField('updated after saved indicator')`);
+      assert.equal(await evaluate('document.querySelector(".vaultcrypt-chip-value").textContent'),'updated after saved indicator');
+      assert.equal(await evaluate('document.querySelector("[title=Edit]").textContent'),'✏️');
+      assert.deepEqual(await evaluate('window.renderErrors'),[]);
+      console.log(`PASS reactive update after saved indicator expires: table=${table}`);
     }
     for (const table of [false,true]) for (const compactChips of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({table,compactChips,empty:true})})`);await delay(50);

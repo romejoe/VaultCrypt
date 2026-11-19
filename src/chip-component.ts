@@ -68,6 +68,8 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 
 	const chipState = signal<'locked' | 'masked' | 'revealed' | 'unknown' | 'masked-error'>('locked');
 	const justSaved = signal(false);
+	let savedIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
+	let destroyed = false;
 
 	/**
 	 * Editing sub-state signal. null = not editing. When non-null, holds the
@@ -96,6 +98,8 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 	};
 
 	root.addEventListener(CHIP_DESTROY_EVENT, () => {
+		destroyed = true;
+		clearTimeout(savedIndicatorTimer);
 		cleanupPopover();
 		for (const effect of effects) {
 			effect?.();
@@ -346,10 +350,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		const isTruncated = display.length < value.length || value.includes('\n');
 		if (isTruncated) display += '…';
 
-		const showSaved = peek(justSaved);
-		if (showSaved) justSaved.set(false);
-
-		const editBtnRef = createRef<HTMLButtonElement>();
+		const showSaved = justSaved();
 
 		render(html`
 			<span class="vaultcrypt-chip-icon vaultcrypt-chip-icon-unlocked"
@@ -361,7 +362,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 			<span class="vaultcrypt-chip-value"
 				title=${isTruncated ? value : nothing}>${value === '' ? '(empty)' : display}</span>
 			${!compact() ? html`
-				<button ${ref(editBtnRef)}
+				<button
 					class=${showSaved ? 'vaultcrypt-chip-btn vaultcrypt-chip-btn-saved' : 'vaultcrypt-chip-btn'}
 					title="Edit"
 					@click=${(evt: MouseEvent) => {
@@ -375,16 +376,6 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 					copyField(profileId, token.entryPath, peek(field), plugin);
 				}}>📋</button>
 		`, root);
-
-		if (showSaved && editBtnRef.value) {
-			const btn = editBtnRef.value;
-			setTimeout(() => {
-				// Verify button is still in DOM before updating
-				if (!btn.isConnected) return;
-				btn.textContent = '✏️';
-				btn.className = 'vaultcrypt-chip-btn';
-			}, 1500);
-		}
 	}
 
 	// ── Inline editing (single-line) ─────────────────────────────────────────
@@ -608,8 +599,15 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 				newValue,
 				config.path,
 			);
-			root.dataset.vcCopyText = newValue;
-			justSaved.set(true);
+			if (!destroyed) {
+				root.dataset.vcCopyText = newValue;
+				justSaved.set(true);
+				clearTimeout(savedIndicatorTimer);
+				savedIndicatorTimer = setTimeout(() => {
+					savedIndicatorTimer = undefined;
+					justSaved.set(false);
+				}, 1500);
+			}
 			return true;
 		} catch (err) {
 			console.error('[VaultCrypt] Failed to save field', err);
