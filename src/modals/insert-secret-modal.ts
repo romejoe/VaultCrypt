@@ -8,7 +8,8 @@ import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
 import {ATTACHMENT_PREFIX, VALID_TOKEN_SEGMENT} from '../inline-parser';
-import {buildEntryTable, insertMarkdownTable} from '../entry-table';
+import {buildEntryTable, insertMarkdownBlock} from '../entry-table';
+import {buildLiveTableBlock} from '../live-table-reference';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ export class InsertSecretModal extends Modal {
 	selectedProfile$: ReadSignal<DeepReadonly<VaultCryptProfile> | null>;
 	selectedProfileLocked$: ReadSignal<boolean>;
 
-	constructor(app: App, plugin: VaultCryptPlugin, editor?: Editor, private readonly mode: 'field' | 'table' = 'field') {
+	constructor(app: App, plugin: VaultCryptPlugin, editor?: Editor, private readonly mode: 'field' | 'table' | 'live-table' = 'field') {
 		super(app);
 		this.plugin = plugin;
 		this.editor = editor;
@@ -94,7 +95,9 @@ export class InsertSecretModal extends Modal {
 	onOpen() {
 		this.isOpen = true;
 		const {contentEl} = this;
-		this.titleEl.setText(this.mode === 'table' ? 'Insert entry as table' : 'Insert secret');
+		const title = this.mode === 'field' ? 'Insert secret'
+			: this.mode === 'table' ? 'Insert entry as table' : 'Insert live entry table';
+		this.titleEl.setText(title);
 
 		const profileIds = Object.keys(this.plugin.settings.profiles);
 		if (profileIds.length === 0) {
@@ -130,7 +133,7 @@ export class InsertSecretModal extends Modal {
 		this.lockedWarningEl = lockedDiv;
 
 		// Tree label + container
-		contentEl.createEl('p', {cls: 'setting-item-name', text: this.mode === 'table' ? 'Select entry' : 'Select group or entry'});
+		contentEl.createEl('p', {cls: 'setting-item-name', text: this.mode === 'field' ? 'Select group or entry' : 'Select entry'});
 		this.treeContainerEl = contentEl.createDiv({cls: 'vaultcrypt-tree-container'});
 
 		// Entry fields section (hidden until "New entry here" is clicked)
@@ -148,7 +151,7 @@ export class InsertSecretModal extends Modal {
 			.addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()))
 			.addButton(btn => {
 				this.insertBtn = btn;
-				btn.setButtonText(this.mode === 'table' ? 'Insert table' : 'Insert').setCta().setDisabled(true)
+				btn.setButtonText(this.mode === 'field' ? 'Insert' : 'Insert table').setCta().setDisabled(true)
 					.onClick(() => {
 						this.submit().catch(e => console.error('[VaultCrypt] InsertSecretModal error', e));
 					});
@@ -761,7 +764,7 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private updateInsertButtonState() {
-		if (this.mode === 'table') {
+		if (this.mode !== 'field') {
 			this.insertBtn?.setDisabled(this.isSubmitting || !this.selectedEntryPath || !this.editor);
 			return;
 		}
@@ -788,16 +791,18 @@ export class InsertSecretModal extends Modal {
 			this.showError('The selected entry is no longer available.');
 			return;
 		}
-		const attachments = session.getEntryAttachmentNames(profileId, entryPath) ?? [];
-		const table = buildEntryTable(profileId, entryPath, fields, attachments);
+		const table = this.mode === 'live-table'
+			? buildLiveTableBlock(profileId, entryPath)
+			: buildEntryTable(profileId, entryPath, fields, session.getEntryAttachmentNames(profileId, entryPath) ?? []);
 		if (table === null) {
-			this.showError('There are no fields or attachments that can be referenced in this table.');
+			this.showError(this.mode === 'live-table' ? 'This entry cannot be referenced in a live table.'
+				: 'There are no fields or attachments that can be referenced in this table.');
 			return;
 		}
 
-		insertMarkdownTable(this.editor, table);
+		insertMarkdownBlock(this.editor, table);
 		this.plugin.lastUsedProfileId = profileId;
-		new Notice('Entry table inserted');
+		new Notice(this.mode === 'live-table' ? 'Live entry table inserted' : 'Entry table inserted');
 		this.close();
 	}
 
@@ -808,7 +813,7 @@ export class InsertSecretModal extends Modal {
 		this.errorEl.addClass('vaultcrypt-hidden');
 
 		try {
-			if (this.mode === 'table') {
+			if (this.mode !== 'field') {
 				this.insertSelectedEntryTable();
 				return;
 			}

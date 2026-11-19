@@ -54,6 +54,7 @@ export function processVcTokensInDom(
 		const text = textNode.nodeValue ?? '';
 		const tokens = parseVcTokens(text);
 		if (tokens.length === 0) continue;
+		if (textNode.parentElement?.closest('[data-vc-chip]')) continue;
 
 		const parent = textNode.parentNode;
 		if (!parent) continue;

@@ -27,6 +27,7 @@ export class EditSecretModal extends Modal {
 
 	// The file that was active when the modal opened — used for token replacement
 	private sourceFile: TFile | null = null;
+	private readonly sourceReference: boolean;
 
 	// Attachment state
 	private existingAttachments: { name: string; size: number }[] = [];
@@ -43,13 +44,21 @@ export class EditSecretModal extends Modal {
 	private isSubmitting = false;
 	private isCreating = false;
 
-	constructor(app: App, plugin: VaultCryptPlugin, profileId: string, entryPath: string, token: ParsedVcToken) {
+	constructor(
+		app: App,
+		plugin: VaultCryptPlugin,
+		profileId: string,
+		entryPath: string,
+		token: ParsedVcToken,
+		{sourceReference = true}: {sourceReference?: boolean} = {},
+	) {
 		super(app);
 		this.plugin = plugin;
 		this.profileId = profileId;
 		this.entryPath = entryPath;
 		this.token = token;
-		this.sourceFile = this.app.workspace.getActiveFile();
+		this.sourceReference = sourceReference;
+		this.sourceFile = sourceReference ? this.app.workspace.getActiveFile() : null;
 	}
 
 	onOpen() {
@@ -198,21 +207,22 @@ export class EditSecretModal extends Modal {
 				.setButtonText('Add attachment')
 				.onClick(() => this.triggerFileInput()));
 
-		// Reference field dropdown
-		contentEl.createEl('hr');
-		new Setting(contentEl)
-			.setName('Reference field')
-			.setDesc('The field this chip resolves to when revealed')
-			.addDropdown(dd => {
-				this.fieldRefDropdown = dd;
-				dd.onChange(value => {
-					this.referenceField = value;
-					this.updateTokenPreview();
+		if (this.sourceReference) {
+			contentEl.createEl('hr');
+			new Setting(contentEl)
+				.setName('Reference field')
+				.setDesc('The field this chip resolves to when revealed')
+				.addDropdown(dd => {
+					this.fieldRefDropdown = dd;
+					dd.onChange(value => {
+						this.referenceField = value;
+						this.updateTokenPreview();
+					});
 				});
-			});
 
-		this.tokenPreviewEl = contentEl.createDiv({cls: 'vaultcrypt-token-preview-row'});
-		this.refreshFieldDropdown();
+			this.tokenPreviewEl = contentEl.createDiv({cls: 'vaultcrypt-token-preview-row'});
+			this.refreshFieldDropdown();
+		}
 
 		// Error message
 		this.errorEl = contentEl.createEl('p', {cls: 'mod-warning vaultcrypt-hidden'});

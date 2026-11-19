@@ -69,7 +69,7 @@ const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, 
 		`,
 	});
 
-async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultField = 'Password', existing} = {}) {
+async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultField = 'Password', existing, sourceReference} = {}) {
 	t.mock.method(console, 'error', () => {});
 	Setting.instances.length = 0;
 	Notice.messages.length = 0;
@@ -96,7 +96,7 @@ async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultFie
 	const plugin = {sessionService: service, settings: {profiles: {test: config}, general: {defaultProfile: ''}},
 		vaultCryptState$: signal({profiles: [{id: 'test', isLocked: false}]}),
 		refreshChips() { this.refreshes++; }, refreshes: 0};
-	const modal = new EditSecretModal(app, plugin, 'test', token.entryPath, token);
+	const modal = new EditSecretModal(app, plugin, 'test', token.entryPath, token, {sourceReference});
 	modal.open();
 	const row = name => Setting.instances.find(setting => setting.name === name);
 	const edit = (name, value) => row(name).controls[0].change(value);
@@ -163,6 +163,25 @@ test('an entry that becomes unavailable while selecting it leaves the note uncha
 	assert.equal(insert.closed, false);
 	assert.match(insert.errorEl.textContent, /no longer available/);
 	assert.equal(f.writes(), 0);
+});
+
+test('live insertion writes a single entry reference and edits leave the note intact', async t => {
+	const raw = '{{vc:test/Group/Entry#ApiKey}}';
+	const f = await fixture(t, {raw, existing: {ApiKey: 'private'}, sourceReference: false});
+	assert.equal(f.row('Reference field'), undefined);
+	Setting.instances.find(row => row.controls[0]?.value === 'ApiKey').controls[2].click();
+	t.mock.method(f.app.vault, 'modify', async () => { throw new Error('Tried to rewrite the note'); });
+	await f.modal.submit();
+	assert.equal(f.modal.closed, true);
+	assert.equal(f.service.getFieldValue('test', f.token.entryPath, 'ApiKey'), null);
+	assert.equal(f.note(), raw);
+	const writes = f.writes();
+
+	const insert = f.openInsert('live-table', {lines: ['Before', '', 'After'], cursor: {line: 1, ch: 0}});
+	insert.selectEntry(f.token.entryPath);
+	await insert.submit();
+	assert.deepEqual(f.inserted, ['\n```vaultcrypt-table\ntest/Group/Entry\n```\n']);
+	assert.equal(f.writes(), writes);
 });
 
 test('creation keeps blank standard and custom fields and their selected reference', async t => {

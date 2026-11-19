@@ -30,6 +30,7 @@ const {outputFiles} = await build({
     import {buildEditorExtension} from './src/editor-extension';
     import {buildChipElement} from './src/chip-component';
     import {processVcTokensInDom} from './src/inline-parser';
+    import {registerLiveEntryTables} from './src/live-entry-table';
     import {buildCopyTextFromSelection} from './src/clipboard-intercept';
     import {signal, tick} from '@maverick-js/signals';
     let view;
@@ -73,6 +74,28 @@ const {outputFiles} = await build({
         window.tableActivations=0;cell.addEventListener('pointerdown',()=>{window.tableActivations++;});
         document.body.append(table);processVcTokensInDom(table, token=>buildChipElement(token,plugin));tick();
       }
+      if (options.liveTable) {
+        view.destroy();
+        const container = document.createElement('div');
+        container.id = 'table-fixture';
+        document.body.append(container);
+        const names = signal({fields: ['Title', 'Password'], attachments: []});
+        plugin.sessionService.getEntryNames = () => plugin.vaultCryptState$().profiles[0].isLocked ? null : names();
+        plugin.register = callback => { window.unloadLiveTable = callback; };
+        plugin.registerMarkdownCodeBlockProcessor = (language, handler) => {
+          if (language !== 'vaultcrypt-table') throw new Error('Unexpected live table language');
+          handler('test/entry', container, {addChild: child => child.onload()});
+        };
+        registerLiveEntryTables(plugin);
+        window.initialLiveChip = container.querySelector('[data-vc-chip]');
+        window.updateLiveRows = (fields, attachments) => { names.set({fields, attachments}); tick(); };
+        window.lockLiveTable = () => {
+          options.locked = true;
+          plugin.vaultCryptState$.set({profiles: [{id: 'test', isLocked: true}]});
+          tick();
+        };
+        window.liveRowLabels = () => [...container.querySelectorAll('tbody tr td:first-child')].map(cell => cell.textContent);
+      }
     };
     for (const type of ['mousedown', 'mouseup', 'click', 'selectionchange', 'focusin']) document.addEventListener(type, event => { const target = event.target; window.logs.push({event: type, target: target.title || target.className || target.nodeName, prevented: event.defaultPrevented, head: view?.state.selection.main.head}); }, true);
     window.snapshot = () => ({head: view.state.selection.main.head, chip: document.querySelector('[data-vc-chip]')?.className ?? null, input: !!document.querySelector('.vaultcrypt-chip-input'), active: document.activeElement?.className, selection: {anchor: document.getSelection()?.anchorNode?.parentElement?.className, anchorOffset: document.getSelection()?.anchorOffset, focus: document.getSelection()?.focusNode?.parentElement?.className, focusOffset: document.getSelection()?.focusOffset}, logs: window.logs});
@@ -82,8 +105,32 @@ const {outputFiles} = await build({
   bundle: true, write: false, format: 'iife', platform: 'browser',
   plugins: [{name: 'mock-host', setup(builder) {
     builder.onResolve({filter: /^obsidian$/}, () => ({path: 'host', namespace: 'mock'}));
-    builder.onResolve({filter: /^\.\/modals$/}, () => ({path: 'modals', namespace: 'mock'}));
-    builder.onLoad({filter: /.*/, namespace: 'mock'}, args => ({contents: args.path === 'host' ? `import {StateField} from '@codemirror/state'; export const editorLivePreviewField = StateField.define({create: () => true, update: value => value}); export class Menu {} export class Notice {} export class TFile {} export const Platform = {isDesktop: true};` : `
+    builder.onResolve({filter: /^\.\/modals(?:\/(?:edit-secret-modal|unlock-modal))?$/}, () => ({path: 'modals', namespace: 'mock'}));
+    builder.onLoad({filter: /.*/, namespace: 'mock'}, args => ({contents: args.path === 'host' ? `
+      import {StateField} from '@codemirror/state';
+      export const editorLivePreviewField = StateField.define({create: () => true, update: value => value});
+      export class Menu {} export class Notice {} export class TFile {} export const Platform = {isDesktop: true};
+      HTMLElement.prototype.setText = function(text) { this.textContent = text; };
+      HTMLElement.prototype.createEl = function(tag, {cls, text, attr} = {}) {
+        const el = this.ownerDocument.createElement(tag);
+        if (cls) el.className = cls;
+        if (text) el.textContent = text;
+        for (const [name, value] of Object.entries(attr ?? {})) el.setAttribute(name, value);
+        return this.appendChild(el);
+      };
+      HTMLElement.prototype.createDiv = function(options) { return this.createEl('div', options); };
+      HTMLElement.prototype.empty = function() { this.replaceChildren(); };
+      export class MarkdownRenderChild {
+        cleanups = [];
+        constructor(el) { this.containerEl = el; }
+        register(callback) { this.cleanups.push(callback); }
+        registerDomEvent(el, type, callback) {
+          el.addEventListener(type, callback);
+          this.register(() => el.removeEventListener(type, callback));
+        }
+        unload() { this.onunload(); this.cleanups.forEach(cb => cb()); }
+      }
+    ` : `
       export class UnlockModal {
         constructor(app, plugin, profileId, onDone) {this.profileId=profileId;this.onDone=onDone;}
         open() {
@@ -120,6 +167,23 @@ try {
   await cdp('Runtime.enable');
   await cdp('Page.navigate', {url: pathToFileURL(join(directory, 'probe.html')).href});
   await delay(1000);
+  await evaluate('window.reset({liveTable: true})');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password']);
+  await evaluate('window.updateLiveRows(["Title", "Password", "Api_Key"], ["guide.txt"])');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password', 'Api_Key', 'attachment:guide.txt']);
+  assert.equal(await evaluate('document.querySelector("#table-fixture [data-vc-chip]") === window.initialLiveChip'), true);
+  await evaluate('window.updateField("updated value")');
+  assert.equal(await evaluate('window.initialLiveChip.dataset.vcCopyText'), 'updated value');
+  await evaluate('window.updateLiveRows(["Password"], [])');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password']);
+  await evaluate('window.lockLiveTable()');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), []);
+  assert.equal(await evaluate('document.querySelector("#table-fixture [role=status]").textContent'), 'This profile is locked.');
+  await evaluate('window.unlockProfile()');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password']);
+  await evaluate('window.unloadLiveTable(); window.updateLiveRows(["Other"], []);');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), []);
+  console.log('PASS live entry table updates rows, preserves active chips, and clears on lock and unload');
   {
     async function click(selector, side) {
       const rect = await evaluate(`(() => {const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:${side === 'left' ? 'r.x+2' : side === 'right' ? 'r.right-2' : 'r.x+r.width/2'},y:r.y+r.height/2};})()`);
