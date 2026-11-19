@@ -1,4 +1,5 @@
 import {App} from 'obsidian';
+import {Kdbx, KdbxCredentials, ProtectedValue} from 'kdbxweb';
 import {getVaultFile} from './utils';
 
 /** Separates storage failures from password/decryption failures in the unlock UI. */
@@ -39,6 +40,10 @@ export async function readKdbxFile(app: App, path: string): Promise<ArrayBuffer>
 		if (error instanceof KdbxFileError) throw error;
 		throw new KdbxFileError(`Could not read KDBX file: ${path}`, error);
 	}
+}
+
+export function loadKdbxWithPassword(buffer: ArrayBuffer, password: string): Promise<Kdbx> {
+	return Kdbx.load(buffer, new KdbxCredentials(ProtectedValue.fromString(password)));
 }
 
 /** Preserve Vault events for indexed files, and support unindexed database saves. */

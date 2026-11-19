@@ -1,6 +1,7 @@
 import {App, ButtonComponent, Modal, Setting} from 'obsidian';
 import VaultCryptPlugin from '../main';
-import {ProfileConfig, validateProfileName, VaultCryptSettings} from '../settings';
+import {ProfileConfig, VaultCryptSettings} from '../settings';
+import {validateProfileName} from '../profile-name';
 import {KdbxVersion} from '../kdbx-service';
 
 export class AddProfileModal extends Modal {

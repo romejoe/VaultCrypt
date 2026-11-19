@@ -28,7 +28,7 @@ Reference secrets in your Markdown notes with tokens like `{{vc:profileId/path/t
 
 ### Workflow
 
-1. Create a profile in **Settings → VaultCrypt** pointing to a `.kdbx` file (or let the plugin create one).
+1. Create a profile or import an existing `.kdbx` database in **Settings → VaultCrypt**.
 2. Unlock the profile with your master password.
 3. Add entries to the database via the plugin's editor commands.
 4. Insert `{{vc:...}}` tokens into your notes — they render as chips in Live Preview and Reading mode.
@@ -43,6 +43,12 @@ If a token points to a missing entry, its revealed chip shows **Entry not found*
 Fields can have empty values. Clearing a value and saving keeps the field; remove a custom field's row to delete it. Revealed empty fields display **(empty)**, and their copy button copies an empty string.
 
 Enable **Settings → VaultCrypt → Auto-unlock on file open** and select **Remember password** when unlocking to automatically unlock referenced profiles when opening notes, including the active note restored after startup. Keyring-managed profiles try the remembered keyring password first, then their own remembered profile password if needed.
+
+### Import existing databases
+
+VaultCrypt scans its storage directory on first run and prompts you if it finds existing KeePass databases. To import databases later, copy the `.kdbx` files into the configured storage directory or a subfolder and select **Settings → VaultCrypt → Import vaults**.
+
+Select the databases you want to use, enter each database’s existing password, then select **Import selected**. VaultCrypt verifies that each database opens with its password alone before adding it. Databases that require a key file or another credential are unsupported. VaultCrypt uses each database in place and uses the password only to verify the import. If your notes already reference a profile, enter its previous name to reconnect those references.
 
 ## Installation
 

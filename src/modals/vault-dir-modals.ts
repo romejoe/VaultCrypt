@@ -7,8 +7,9 @@ import VaultCryptPlugin from '../main';
  */
 export class SyncWarningModal extends Modal {
 	private plugin: VaultCryptPlugin;
+	private moving = false;
 
-	constructor(app: App, plugin: VaultCryptPlugin) {
+	constructor(app: App, plugin: VaultCryptPlugin, private onDone: () => void) {
 		super(app);
 		this.plugin = plugin;
 	}
@@ -34,6 +35,7 @@ export class SyncWarningModal extends Modal {
 				.setButtonText('Move to visible folder')
 				.setCta()
 				.onClick(async () => {
+					this.moving = true;
 					this.close();
 					try {
 						await this.plugin.profileService.moveVaultDir('VaultCrypt');
@@ -44,6 +46,7 @@ export class SyncWarningModal extends Modal {
 					this.plugin.patchSettings(s => {
 						s.general.hasSeenSyncWarning = true;
 					});
+					this.onDone();
 				}))
 			.addButton(btn => btn
 				.setButtonText('Keep as is')
@@ -57,6 +60,7 @@ export class SyncWarningModal extends Modal {
 
 	onClose() {
 		this.contentEl.empty();
+		if (!this.moving) this.onDone();
 	}
 }
 
