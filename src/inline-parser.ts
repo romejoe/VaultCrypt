@@ -1,4 +1,5 @@
 export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:#([a-zA-Z0-9_\-.:]+))?}}/g;
+export const ATTACHMENT_PREFIX = 'attachment:';
 
 /** Matches a single valid token segment (profile id, path part, or field name). */
 export const VALID_TOKEN_SEGMENT = /^[a-zA-Z0-9_\-.:]+$/;
@@ -53,6 +54,7 @@ export function processVcTokensInDom(
 		const text = textNode.nodeValue ?? '';
 		const tokens = parseVcTokens(text);
 		if (tokens.length === 0) continue;
+		if (textNode.parentElement?.closest('[data-vc-chip]')) continue;
 
 		const parent = textNode.parentNode;
 		if (!parent) continue;

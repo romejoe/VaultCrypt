@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {UnlockSessionService, TFile, kdbxweb} = await loadObsidianRuntime(`
+const {UnlockSessionService, TFile, kdbxweb, effect, tick} = await loadObsidianRuntime(`
 	export {UnlockSessionService} from './src/unlock-session.ts';
 	export {TFile} from 'obsidian';
 	export * as kdbxweb from 'kdbxweb';
+	export {effect, tick} from '@maverick-js/signals';
 `);
 
 function deferred() {
@@ -39,6 +40,45 @@ async function fixture(t) {
 	}
 	return {service, persisted, databases, setWrite: callback => { write = callback; }};
 }
+
+test('entry names react to saved changes, rollbacks, and lock state for their profile', async t => {
+	const {service, setWrite} = await fixture(t);
+	const snapshots = [];
+	t.after(effect(() => { snapshots.push(service.getEntryNames('test', 'Entry')); }));
+	const current = () => { tick(); return snapshots.at(-1); };
+	assert.ok(!current().fields.includes('ApiKey'));
+
+	const started = deferred(), pending = deferred();
+	setWrite(async path => {
+		if (path !== 'test.kdbx') return;
+		started.resolve();
+		await pending.promise;
+	});
+	const change = service.setFieldValue('test', 'Entry', 'ApiKey', 'rejected', 'test.kdbx');
+	const rejected = assert.rejects(change, /Could not save KDBX file: test\.kdbx/);
+	await started.promise;
+	await service.setFieldValue('other', 'Entry', 'Password', 'saved', 'other.kdbx');
+	assert.ok(!current().fields.includes('ApiKey'));
+	assert.equal(snapshots.length, 1);
+	pending.reject(new Error('Write failed'));
+	await rejected;
+	assert.ok(!current().fields.includes('ApiKey'));
+
+	setWrite(async () => {});
+	await service.updateEntryFields('test', 'Entry', {ApiKey: 'saved'}, 'test.kdbx');
+	await service.setAttachment('test', 'Entry', 'guide.txt', new ArrayBuffer(1), 'test.kdbx');
+	assert.deepEqual(current(), {fields: ['Title', 'ApiKey'], attachments: ['guide.txt']});
+	await service.deleteAttachment('test', 'Entry', 'guide.txt', 'test.kdbx');
+	assert.deepEqual(current().attachments, []);
+	await service.deleteEntry('test', 'Entry', 'test.kdbx');
+	assert.equal(current(), null);
+	await service.createEntryWithFields('test', 'Entry', {Password: 'restored'}, 'test.kdbx');
+	assert.ok(current().fields.includes('Password'));
+	service.lockProfile('test');
+	assert.equal(current(), null);
+	await service.unlockProfile('test', {path: 'test.kdbx', autoLockMinutes: 0}, 'test');
+	assert.ok(current().fields.includes('Password'));
+});
 
 for (const failure of ['save', 'write']) {
 	test(`a failed ${failure} rolls back before the next mutation and never persists stale values`, async t => {

@@ -1,14 +1,12 @@
 import {Menu, Notice, Platform, TFile} from 'obsidian';
 import {UnlockModal} from './modals';
-import {ParsedVcToken} from './inline-parser';
+import {ATTACHMENT_PREFIX, ParsedVcToken} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from '@maverick-js/signals';
 import {html, render, nothing} from 'lit-html';
 import {unsafeHTML} from 'lit-html/directives/unsafe-html.js';
 import {CHIP_DESTROY_EVENT} from './chip-component';
 import {protectChipControls} from './chip-interactions';
-
-export const ATTACHMENT_PREFIX = 'attachment:';
 
 const MAX_PREVIEW_BYTES = 10 * 1024; // 10 KB
 

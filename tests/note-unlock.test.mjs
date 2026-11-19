@@ -92,6 +92,17 @@ test('lockAll cancels a note check before its queued work starts', async t => {
 	assert.deepEqual(Notice.instances, []);
 });
 
+test('live tables participate in note auto-unlock', async t => {
+	const f = fixture(t, {managed: false});
+	f.saved.saveProfilePassword('test', 'profile-password');
+	const table = '```vaultcrypt-table\ntest/Group/Entry\n```';
+	await f.open('example.md', '````markdown\n' + table + '\n````');
+	await f.open('invalid.md', table.replace('Group/Entry', 'Group/Entry#Password'));
+	assert.deepEqual(f.unlocks, []);
+	await f.open('table.md', table.replaceAll('\n', '\r\n'));
+	assert.deepEqual(f.unlocks, ['test']);
+});
+
 for (const queued of [false, true]) {
 	test(`lockAll during a note read cancels ${queued ? 'that read and an already queued note' : 'that check'}`, async t => {
 		const f = fixture(t);

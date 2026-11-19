@@ -1,6 +1,7 @@
 import {Notice, type TFile} from 'obsidian';
 import type VaultCryptPlugin from './main';
 import {parseVcTokens} from './inline-parser';
+import {getLiveTableProfileIds} from './live-table-reference';
 import {KeyringUnlockModal, UnlockModal} from './modals';
 
 /** Check opened notes and the restored active note, without overlapping unlocks. */
@@ -41,8 +42,9 @@ async function unlockNoteProfiles(plugin: VaultCryptPlugin, file: TFile, isActiv
 	const content = await plugin.app.vault.read(file);
 	if (!isActive()) return;
 	const settings = plugin.settings;
-	const lockedProfileIds = new Set(parseVcTokens(content)
-		.map(token => token.profileId.toLowerCase())
+	const profileIds = [...parseVcTokens(content).map(token => token.profileId), ...getLiveTableProfileIds(content)];
+	const lockedProfileIds = new Set(profileIds
+		.map(id => id.toLowerCase())
 		.filter(id => Object.prototype.hasOwnProperty.call(settings.profiles, id))
 		.filter(id => !plugin.sessionService.isUnlocked(id)));
 

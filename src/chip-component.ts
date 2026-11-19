@@ -1,11 +1,11 @@
 import {Menu, Notice, Platform} from 'obsidian';
 import {UnlockModal, EditSecretModal, DeleteSecretModal} from './modals';
-import {ParsedVcToken, resolveFieldName} from './inline-parser';
+import {ATTACHMENT_PREFIX, ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {html, render, nothing} from 'lit-html';
 import {ref, createRef} from 'lit-html/directives/ref.js';
-import {buildAttachmentChipElement, ATTACHMENT_PREFIX} from './attachment-chip';
+import {buildAttachmentChipElement} from './attachment-chip';
 import {protectChipControls} from './chip-interactions';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';
@@ -35,14 +35,18 @@ interface EditState {
 /**
  * Dispatcher: routes to the attachment chip or the secret-value chip based on the token's field name.
  */
-export function buildChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+export function buildChipElement(
+	token: ParsedVcToken,
+	plugin: VaultCryptPlugin,
+	{sourceReference = true}: {sourceReference?: boolean} = {},
+): HTMLElement {
 	if (token.fieldName?.startsWith(ATTACHMENT_PREFIX)) {
 		return buildAttachmentChipElement(token, plugin);
 	}
-	return buildSecretChipElement(token, plugin);
+	return buildSecretChipElement(token, plugin, sourceReference);
 }
 
-function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin): HTMLElement {
+function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin, sourceReference: boolean): HTMLElement {
 	const profileId = token.profileId.toLowerCase();
 	let effects: StopEffect[] = [];
 	const profileConfig = computed(() => {
@@ -120,7 +124,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 				.setTitle(entryExists ? 'Edit entry' : 'Create entry')
 				.setIcon('pencil')
 				.onClick(() => {
-					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
+					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token, {sourceReference}).open();
 				}));
 
 			if (entryExists) menu.addItem(item => item
@@ -330,7 +334,7 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 			<button class="vaultcrypt-chip-btn" title=${action} aria-label=${action}
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();
-					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
+					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token, {sourceReference}).open();
 				}}>✏️</button>
 			<button class="vaultcrypt-chip-btn" title="Retry"
 				@click=${(evt: MouseEvent) => {

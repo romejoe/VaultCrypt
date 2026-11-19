@@ -2,7 +2,7 @@ import {App} from 'obsidian';
 import {readKdbxFile, writeKdbxFile} from './kdbx-file';
 import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
-import {signal} from '@maverick-js/signals';
+import {signal, untrack, type WriteSignal} from '@maverick-js/signals';
 import {ProfileMutationQueue} from './profile-mutation-queue';
 
 const PROTECTED_FIELDS = new Set(['Password']);
@@ -55,6 +55,7 @@ export class UnlockSessionService {
 	private readonly lockCallbacks: LockCallback[] = [];
 	private readonly unlockCallbacks: UnlockCallback[] = [];
 	private readonly fieldRevision$ = signal(0);
+	private readonly profileRevisions = new Map<string, WriteSignal<number>>();
 	private readonly mutations = new ProfileMutationQueue();
 	private lockGeneration = 0;
 
@@ -80,6 +81,7 @@ export class UnlockSessionService {
 		this.openDbs.set(profileId, db);
 		this.scheduleAutoLock(profileId, config.autoLockMinutes);
 		this.emitUnlock(profileId);
+		this.notifyEntryChange(profileId);
 	}
 
 	/**
@@ -113,6 +115,7 @@ export class UnlockSessionService {
 			this.timers.delete(profileId);
 		}
 		this.emitLock(profileId);
+		this.notifyEntryChange(profileId);
 	}
 
 	/** Locks all currently unlocked profiles. */
@@ -459,6 +462,19 @@ export class UnlockSessionService {
 		return [...entry.fields.keys()];
 	}
 
+	/** Observe the fields and attachments available for a rendered entry table. */
+	getEntryNames(profileId: string, entryPath: string): {fields: string[]; attachments: string[]} | null {
+		let revision = this.profileRevisions.get(profileId);
+		if (!revision) {
+			revision = untrack(() => signal(0));
+			this.profileRevisions.set(profileId, revision);
+		}
+		revision();
+		const db = this.getDatabase(profileId);
+		const entry = db && this.resolveEntry(db, entryPath);
+		return entry ? {fields: [...entry.fields.keys()], attachments: [...entry.binaries.keys()]} : null;
+	}
+
 	/**
 	 * Creates a new entry with all provided fields at once and saves the database.
 	 * Throws if the profile is locked, or if an entry already exists at the given path.
@@ -509,6 +525,10 @@ export class UnlockSessionService {
 		if (this.getDatabase(profileId) === db) this.lockProfile(profileId);
 	}
 
+	private notifyEntryChange(profileId: string): void {
+		this.profileRevisions.get(profileId)?.set(revision => revision + 1);
+	}
+
 	private async mutateProfile(profileId: string, mutation: (db: kdbxweb.Kdbx) => Promise<void>): Promise<void> {
 		const db = this.getDatabase(profileId);
 		if (!db) throw new Error(`Profile "${profileId}" is not unlocked`);
@@ -516,7 +536,12 @@ export class UnlockSessionService {
 			if (this.getDatabase(profileId) !== db) {
 				throw new Error(`Profile "${profileId}" session changed before the save could start`);
 			}
-			await mutation(db);
+			try {
+				await mutation(db);
+			} finally {
+				// Notify only this profile once persistence or rollback has finished.
+				if (this.getDatabase(profileId) === db) this.notifyEntryChange(profileId);
+			}
 		});
 	}
 

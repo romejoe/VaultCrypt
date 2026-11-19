@@ -13,6 +13,7 @@ import {revokeAttachmentVideoCache} from './attachment-chip';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
 import {SecretStorageService} from './secret-storage-service';
 import {registerNoteUnlock} from './note-unlock';
+import {registerLiveEntryTables} from './live-entry-table';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -303,6 +304,22 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'vault-crypt-insert-entry-as-table',
+			name: 'Insert entry as table',
+			editorCallback: (editor: Editor) => {
+				new InsertSecretModal(this.app, this, editor, 'table').open();
+			}
+		});
+
+		this.addCommand({
+			id: 'vault-crypt-insert-live-entry-table',
+			name: 'Insert live entry table',
+			editorCallback: (editor: Editor) => {
+				new InsertSecretModal(this.app, this, editor, 'live-table').open();
+			}
+		});
+
+		this.addCommand({
 			id: 'vault-crypt-search-secrets',
 			name: 'Search secrets',
 			editorCallback: (editor: Editor) => {
@@ -320,6 +337,7 @@ export default class VaultCryptPlugin extends Plugin {
 		);
 
 		registerNoteUnlock(this);
+		registerLiveEntryTables(this);
 
 		// CodeMirror extension for source / live preview decoration
 		this.registerEditorExtension(buildEditorExtension(this));
@@ -337,7 +355,7 @@ export default class VaultCryptPlugin extends Plugin {
 			// Skip if selection is inside a CM6 editor (handled by the editor extension)
 			const ancestor = sel.getRangeAt(0).commonAncestorContainer;
 			const container = ancestor instanceof HTMLElement ? ancestor : ancestor.parentElement;
-			if (container?.closest('.cm-editor')) return;
+			if (container?.closest('.cm-editor') && !container.closest('.vaultcrypt-live-table')) return;
 
 			const copyText = buildCopyTextFromSelection(sel, this);
 			if (copyText === null) return;

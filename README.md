@@ -34,6 +34,10 @@ Reference secrets in your Markdown notes with tokens like `{{vc:profileId/path/t
 4. Insert `{{vc:...}}` tokens into your notes — they render as chips in Live Preview and Reading mode.
 5. Click the chip to copy the value; the clipboard is auto-cleared after the configured timeout.
 
+Run **VaultCrypt: Insert entry as table** from the command palette, then select an entry and choose **Insert table**. This inserts a Markdown table at the editor cursor with a chip for each referenceable field and attachment. The note stores references to those values, so the chips reflect later value edits. To include newly added fields, insert a new table.
+
+Run **VaultCrypt: Insert live entry table** to keep the rows in sync with the entry. In Live Preview or Reading view, select **Edit entry** to add, edit, or remove fields and attachments. Saved changes appear in the table automatically, and locking the profile hides the rows. The Markdown source stores a single entry reference.
+
 If a token points to a missing entry, its revealed chip shows **Entry not found** with a **Create entry** pencil button. If the entry exists but the referenced field is missing, it shows **Field not found** with an **Add field** pencil button. Both open a form using the referenced entry path and field; select **Create entry** to save a new entry, or **Save** to update an existing one. You can also right-click an unlocked chip and select **Create entry** or **Edit entry**.
 
 Fields can have empty values. Clearing a value and saving keeps the field; remove a custom field's row to delete it. Revealed empty fields display **(empty)**, and their copy button copies an empty string.
