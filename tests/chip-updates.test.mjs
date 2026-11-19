@@ -47,7 +47,7 @@ const mocks = {
 		constructor(...args) {this.args = args;}
 		open() {EditSecretModal.opened.push(this);}
 	} export class DeleteSecretModal {}`,
-	'./attachment-chip': 'export const ATTACHMENT_PREFIX = "@"; export function buildAttachmentChipElement() {}',
+	'./attachment-chip': 'export function buildAttachmentChipElement() {}',
 	'lit-html': `
 		export const nothing = '';
 		export function html(strings, ...values) { return {strings, values}; }

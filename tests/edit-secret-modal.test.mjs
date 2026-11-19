@@ -12,7 +12,6 @@ const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, 
 		export * as kdbxweb from 'kdbxweb';
 		export {signal, tick} from '@maverick-js/signals';
 	`, {
-		'../attachment-chip': `export const ATTACHMENT_PREFIX = 'attachment:';`,
 		'./generate-password-modal': 'export class GeneratePasswordModal {}',
 		'./unlock-modal': 'export class UnlockModal {}',
 		'lit-html': 'export const html = (strings, ...values) => ({strings, values}); export const nothing = ""; export const render = () => {};',
@@ -102,10 +101,16 @@ async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultFie
 	const row = name => Setting.instances.find(setting => setting.name === name);
 	const edit = (name, value) => row(name).controls[0].change(value);
 	const inserted = [];
-	const openInsert = () => {
+	const openInsert = (mode, {lines = [''], cursor = {line: 0, ch: 0}} = {}) => {
 		modal.close();
 		Setting.instances.length = 0;
-		const insert = new InsertSecretModal(app, plugin, {getCursor: () => ({line: 0, ch: 0}), replaceRange: text => inserted.push(text)});
+		const editor = {
+			getCursor: () => cursor,
+			getLine: line => lines[line],
+			lineCount: () => lines.length,
+			replaceRange: text => inserted.push(text),
+		};
+		const insert = new InsertSecretModal(app, plugin, editor, mode);
 		insert.open();
 		tick();
 		t.after(() => insert.close());
@@ -113,6 +118,52 @@ async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultFie
 	};
 	return {modal, service, app, db, plugin, row, edit, token, openInsert, inserted, writes: () => writes, note: () => note};
 }
+
+test('inserts a standalone table of explicit secret and attachment references without reading values', async t => {
+	const entryPath = 'Accounts/_Work_/Mail';
+	const f = await fixture(t, {
+		raw: `{{vc:test/${entryPath}}}`, defaultField: 'Api_Key',
+		existing: {Password: 'secret', Api_Key: '', 'Unsupported|Field': 'private'},
+	});
+	await f.service.setAttachment('test', entryPath, 'guide.txt', new ArrayBuffer(4), 'test.kdbx');
+	await f.service.setAttachment('test', entryPath, 'guide draft.txt', new ArrayBuffer(4), 'test.kdbx');
+	const writesBeforeInsert = f.writes();
+	const readValue = t.mock.method(f.service, 'getFieldValue', () => { throw new Error('Read a secret value'); });
+	const insert = f.openInsert('table', {lines: ['Before', '', 'After'], cursor: {line: 1, ch: 0}});
+	assert.equal(insert.insertBtn.disabled, true);
+	assert.equal(f.row('Reference field'), undefined);
+	insert.selectEntry(entryPath);
+	assert.equal(insert.insertBtn.disabled, false);
+	await insert.submit();
+
+	assert.equal(f.inserted.length, 1);
+	const [markdown] = f.inserted;
+	assert.ok(markdown.startsWith('\n| Field | Value |\n| --- | --- |\n'));
+	assert.ok(markdown.endsWith(' |\n'));
+	assert.ok(markdown.includes('| Api\\_Key |'));
+	assert.ok(markdown.includes(`\`{{vc:test/${entryPath}#Api_Key}}\``));
+	assert.deepEqual(parseVcTokens(markdown).map(token => [token.entryPath, token.fieldName]), [
+		[entryPath, 'UserName'], [entryPath, 'Password'], [entryPath, 'URL'],
+		[entryPath, 'Notes'], [entryPath, 'Api_Key'], [entryPath, 'attachment:guide.txt'],
+	]);
+	assert.doesNotMatch(markdown, /secret|private|Unsupported|draft/);
+	assert.equal(readValue.mock.callCount(), 0);
+	assert.equal(f.writes(), writesBeforeInsert);
+	assert.equal(f.plugin.lastUsedProfileId, 'test');
+	assert.equal(insert.closed, true);
+});
+
+test('an entry that becomes unavailable while selecting it leaves the note unchanged', async t => {
+	const f = await fixture(t, {raw: '{{vc:test/Entry}}', existing: {Password: 'secret'}});
+	const insert = f.openInsert('table');
+	insert.selectEntry(f.token.entryPath);
+	f.service.lockProfile('test');
+	await insert.submit();
+	assert.equal(f.inserted.length, 0);
+	assert.equal(insert.closed, false);
+	assert.match(insert.errorEl.textContent, /no longer available/);
+	assert.equal(f.writes(), 0);
+});
 
 test('creation keeps blank standard and custom fields and their selected reference', async t => {
 	const f = await fixture(t, {raw: '{{vc:test/Entry#ApiKey}}'});

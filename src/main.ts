@@ -303,6 +303,14 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'vault-crypt-insert-entry-as-table',
+			name: 'Insert entry as table',
+			editorCallback: (editor: Editor) => {
+				new InsertSecretModal(this.app, this, editor, 'table').open();
+			}
+		});
+
+		this.addCommand({
 			id: 'vault-crypt-search-secrets',
 			name: 'Search secrets',
 			editorCallback: (editor: Editor) => {

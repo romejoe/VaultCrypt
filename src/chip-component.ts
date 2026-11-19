@@ -1,11 +1,11 @@
 import {Menu, Notice, Platform} from 'obsidian';
 import {UnlockModal, EditSecretModal, DeleteSecretModal} from './modals';
-import {ParsedVcToken, resolveFieldName} from './inline-parser';
+import {ATTACHMENT_PREFIX, ParsedVcToken, resolveFieldName} from './inline-parser';
 import type VaultCryptPlugin from './main';
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {html, render, nothing} from 'lit-html';
 import {ref, createRef} from 'lit-html/directives/ref.js';
-import {buildAttachmentChipElement, ATTACHMENT_PREFIX} from './attachment-chip';
+import {buildAttachmentChipElement} from './attachment-chip';
 import {protectChipControls} from './chip-interactions';
 
 export const CHIP_DESTROY_EVENT = 'vaultcrypt-destroy';

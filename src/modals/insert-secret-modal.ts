@@ -7,8 +7,8 @@ import {GeneratePasswordModal} from './generate-password-modal';
 import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
-import {ATTACHMENT_PREFIX} from '../attachment-chip';
-import {VALID_TOKEN_SEGMENT} from '../inline-parser';
+import {ATTACHMENT_PREFIX, VALID_TOKEN_SEGMENT} from '../inline-parser';
+import {buildEntryTable, insertMarkdownTable} from '../entry-table';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ export class InsertSecretModal extends Modal {
 	selectedProfile$: ReadSignal<DeepReadonly<VaultCryptProfile> | null>;
 	selectedProfileLocked$: ReadSignal<boolean>;
 
-	constructor(app: App, plugin: VaultCryptPlugin, editor?: Editor) {
+	constructor(app: App, plugin: VaultCryptPlugin, editor?: Editor, private readonly mode: 'field' | 'table' = 'field') {
 		super(app);
 		this.plugin = plugin;
 		this.editor = editor;
@@ -94,7 +94,7 @@ export class InsertSecretModal extends Modal {
 	onOpen() {
 		this.isOpen = true;
 		const {contentEl} = this;
-		this.titleEl.setText('Insert secret');
+		this.titleEl.setText(this.mode === 'table' ? 'Insert entry as table' : 'Insert secret');
 
 		const profileIds = Object.keys(this.plugin.settings.profiles);
 		if (profileIds.length === 0) {
@@ -130,16 +130,15 @@ export class InsertSecretModal extends Modal {
 		this.lockedWarningEl = lockedDiv;
 
 		// Tree label + container
-		contentEl.createEl('p', {cls: 'setting-item-name', text: 'Select group or entry'});
+		contentEl.createEl('p', {cls: 'setting-item-name', text: this.mode === 'table' ? 'Select entry' : 'Select group or entry'});
 		this.treeContainerEl = contentEl.createDiv({cls: 'vaultcrypt-tree-container'});
 
 		// Entry fields section (hidden until "New entry here" is clicked)
 		this.entryFieldsSectionEl = contentEl.createDiv({cls: 'vaultcrypt-hidden'});
-		this.buildEntryFieldsSection(this.entryFieldsSectionEl);
-
-		// Field reference + token preview
-		const fieldRefContainer = contentEl.createDiv();
-		this.buildFieldRefSection(fieldRefContainer);
+		if (this.mode === 'field') {
+			this.buildEntryFieldsSection(this.entryFieldsSectionEl);
+			this.buildFieldRefSection(contentEl.createDiv());
+		}
 
 		// Error message
 		this.errorEl = contentEl.createEl('p', {cls: 'mod-warning vaultcrypt-hidden'});
@@ -149,7 +148,7 @@ export class InsertSecretModal extends Modal {
 			.addButton(btn => btn.setButtonText('Cancel').onClick(() => this.close()))
 			.addButton(btn => {
 				this.insertBtn = btn;
-				btn.setButtonText('Insert').setCta().setDisabled(true)
+				btn.setButtonText(this.mode === 'table' ? 'Insert table' : 'Insert').setCta().setDisabled(true)
 					.onClick(() => {
 						this.submit().catch(e => console.error('[VaultCrypt] InsertSecretModal error', e));
 					});
@@ -281,21 +280,27 @@ export class InsertSecretModal extends Modal {
 						}
 					}}>${entry.name || '(untitled)'}</li>
 			`)}
-			<li class=${'vaultcrypt-tree-new-entry' + (this.newEntryGroupPath === node.path && this.selectedEntryPath === null ? ' is-active' : '')}
+			${this.mode === 'field' ? this.renderCreateActions(node.path) : nothing}
+		`;
+	}
+
+	private renderCreateActions(groupPath: string): TemplateResult {
+		return html`
+			<li class=${'vaultcrypt-tree-new-entry' + (this.newEntryGroupPath === groupPath && this.selectedEntryPath === null ? ' is-active' : '')}
 				tabindex="0"
 				role="treeitem"
 				@click=${(e: Event) => {
 					e.stopPropagation();
-					this.selectNewEntry(node.path);
+					this.selectNewEntry(groupPath);
 				}}
 				@keydown=${(e: KeyboardEvent) => {
 					if (e.key === 'Enter' || e.key === ' ') {
 						e.preventDefault();
 						e.stopPropagation();
-						this.selectNewEntry(node.path);
+						this.selectNewEntry(groupPath);
 					}
 				}}>New entry here</li>
-			${this.inlineGroupCreatePath === node.path
+			${this.inlineGroupCreatePath === groupPath
 				? html`
 					<li class="vaultcrypt-tree-new-entry" role="treeitem"
 						@click=${(e: Event) => e.stopPropagation()}>
@@ -309,7 +314,7 @@ export class InsertSecretModal extends Modal {
 								const input = e.target as HTMLInputElement;
 								if (e.key === 'Enter') {
 									e.stopPropagation();
-									this.confirmInlineGroupCreate(input.value.trim(), node.path);
+									this.confirmInlineGroupCreate(input.value.trim(), groupPath);
 								}
 								if (e.key === 'Escape') {
 									e.stopPropagation();
@@ -321,8 +326,8 @@ export class InsertSecretModal extends Modal {
 								const valueTrimmed = input.value.trim();
 								const session = this.inlineGroupCreateSession;
 								window.setTimeout(() => {
-									if (this.inlineGroupCreatePath === node.path && this.inlineGroupCreateSession === session) {
-										this.confirmInlineGroupCreate(valueTrimmed, node.path);
+									if (this.inlineGroupCreatePath === groupPath && this.inlineGroupCreateSession === session) {
+										this.confirmInlineGroupCreate(valueTrimmed, groupPath);
 									}
 								}, 100);
 							}}>
@@ -334,13 +339,13 @@ export class InsertSecretModal extends Modal {
 						role="treeitem"
 						@click=${(e: Event) => {
 							e.stopPropagation();
-							this.startInlineGroupCreate(node.path);
+							this.startInlineGroupCreate(groupPath);
 						}}
 						@keydown=${(e: KeyboardEvent) => {
 							if (e.key === 'Enter' || e.key === ' ') {
 								e.preventDefault();
 								e.stopPropagation();
-								this.startInlineGroupCreate(node.path);
+								this.startInlineGroupCreate(groupPath);
 							}
 						}}>New group here</li>
 				`}
@@ -426,6 +431,7 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private selectEntry(entryPath: string) {
+		this.errorEl.addClass('vaultcrypt-hidden');
 		this.cancelInlineGroupCreate();
 		this.selectedEntryPath = entryPath;
 		this.newEntryGroupPath = null;
@@ -755,6 +761,10 @@ export class InsertSecretModal extends Modal {
 	}
 
 	private updateInsertButtonState() {
+		if (this.mode === 'table') {
+			this.insertBtn?.setDisabled(this.isSubmitting || !this.selectedEntryPath || !this.editor);
+			return;
+		}
 		const hasSelection = this.selectedEntryPath !== null || this.newEntryGroupPath !== null;
 		const entryNameOk = this.newEntryGroupPath === null || (!!this.entryName && VALID_PATH_SEGMENT.test(this.entryName));
 		const customFieldsOk = this.newEntryGroupPath === null || this.validateCustomFields() === null;
@@ -767,6 +777,30 @@ export class InsertSecretModal extends Modal {
 		this.errorEl.removeClass('vaultcrypt-hidden');
 	}
 
+	private insertSelectedEntryTable() {
+		const entryPath = this.selectedEntryPath;
+		if (!entryPath || !this.editor) return;
+
+		const profileId = peek(this.selectedProfileId$);
+		const session = this.plugin.sessionService;
+		const fields = session.getEntryFieldNames(profileId, entryPath);
+		if (fields === null) {
+			this.showError('The selected entry is no longer available.');
+			return;
+		}
+		const attachments = session.getEntryAttachmentNames(profileId, entryPath) ?? [];
+		const table = buildEntryTable(profileId, entryPath, fields, attachments);
+		if (table === null) {
+			this.showError('There are no fields or attachments that can be referenced in this table.');
+			return;
+		}
+
+		insertMarkdownTable(this.editor, table);
+		this.plugin.lastUsedProfileId = profileId;
+		new Notice('Entry table inserted');
+		this.close();
+	}
+
 	private async submit() {
 		if (this.isSubmitting) return;
 		this.isSubmitting = true;
@@ -774,6 +808,11 @@ export class InsertSecretModal extends Modal {
 		this.errorEl.addClass('vaultcrypt-hidden');
 
 		try {
+			if (this.mode === 'table') {
+				this.insertSelectedEntryTable();
+				return;
+			}
+
 			const token = this.buildTokenString();
 			if (!token) {
 				this.showError('Select a group or entry first.');
@@ -848,7 +887,7 @@ export class InsertSecretModal extends Modal {
 			this.showError(`Error: ${e instanceof Error ? e.message : String(e)}`);
 		} finally {
 			this.isSubmitting = false;
-			this.insertBtn.setDisabled(false);
+			this.updateInsertButtonState();
 		}
 	}
 

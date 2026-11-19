@@ -1,8 +1,7 @@
 import {App, ButtonComponent, DropdownComponent, Modal, Notice, Setting, TFile, TextComponent} from 'obsidian';
 import type VaultCryptPlugin from '../main';
 import {GeneratePasswordModal} from './generate-password-modal';
-import {type ParsedVcToken, VALID_TOKEN_SEGMENT} from '../inline-parser';
-import {ATTACHMENT_PREFIX} from '../attachment-chip';
+import {ATTACHMENT_PREFIX, type ParsedVcToken, VALID_TOKEN_SEGMENT} from '../inline-parser';
 
 /** Standard KeePass field names that are rendered as dedicated rows. */
 const STANDARD_FIELDS = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes']);
