@@ -34,6 +34,10 @@ Reference secrets in your Markdown notes with tokens like `{{vc:profileId/path/t
 4. Insert `{{vc:...}}` tokens into your notes — they render as chips in Live Preview and Reading mode.
 5. Click the chip to copy the value; the clipboard is auto-cleared after the configured timeout.
 
+If a token points to a missing entry or field, reveal the chip and select **Create and edit** (the pencil button). The form uses the referenced entry path and field; select **Create entry** to save a new entry, or **Save** to update an existing one. You can also right-click an unlocked chip and select **Create entry** or **Edit entry**.
+
+Enable **Settings → VaultCrypt → Auto-unlock on file open** and select **Remember password** when unlocking to automatically unlock referenced profiles when opening notes, including the active note restored after startup. Keyring-managed profiles try the remembered keyring password first, then their own remembered profile password if needed.
+
 ## Installation
 
 ### Community Plugin (recommended)

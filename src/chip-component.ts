@@ -112,14 +112,15 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		const unlocked = plugin.sessionService?.isUnlocked(profileId);
 
 		if (unlocked) {
+			const entryExists = plugin.sessionService.getEntryFields(profileId, token.entryPath) !== null;
 			menu.addItem(item => item
-				.setTitle('Edit entry')
+				.setTitle(entryExists ? 'Edit entry' : 'Create entry')
 				.setIcon('pencil')
 				.onClick(() => {
 					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
 				}));
 
-			menu.addItem(item => item
+			if (entryExists) menu.addItem(item => item
 				.setTitle('Delete entry')
 				.setIcon('trash-2')
 				.onClick(() => {
@@ -318,13 +319,11 @@ function buildSecretChipElement(token: ParsedVcToken, plugin: VaultCryptPlugin):
 		render(html`
 			<span class="vaultcrypt-chip-icon">⚠</span>
 			<span>${reason}</span>
-			${!compact() ? html`
-				<button class="vaultcrypt-chip-btn" title="Create and edit"
-					@click=${(evt: MouseEvent) => {
-						evt.stopPropagation();
-						startEditing();
-					}}>✏️</button>
-			` : nothing}
+			<button class="vaultcrypt-chip-btn" title="Create and edit"
+				@click=${(evt: MouseEvent) => {
+					evt.stopPropagation();
+					new EditSecretModal(plugin.app, plugin, profileId, token.entryPath, token).open();
+				}}>✏️</button>
 			<button class="vaultcrypt-chip-btn" title="Retry"
 				@click=${(evt: MouseEvent) => {
 					evt.stopPropagation();

@@ -127,7 +127,10 @@ export class SecretStorageService {
 							settings.masterKeyringPath, savedKeyringPw, managedLocked,
 						);
 						for (const [profileId, profilePassword] of passwords) {
-							if (sessionService.isUnlocked(profileId)) continue;
+							if (sessionService.isUnlocked(profileId)) {
+								lockedProfileIds.delete(profileId);
+								continue;
+							}
 							const config = settings.profiles[profileId];
 							if (!config) continue;
 							try {
@@ -147,13 +150,19 @@ export class SecretStorageService {
 			}
 		}
 
-		// Try individual saved passwords for non-keyring profiles
+		// A managed profile can also have its own remembered password (for example,
+		// when "Use keyring master password" was turned off in the unlock dialog).
+		// Use it if keyring unlocking was unavailable or unsuccessful.
 		for (const profileId of [...lockedProfileIds]) {
-			if (settings.profiles[profileId]?.managedByKeyring) continue;
+			if (sessionService.isUnlocked(profileId)) {
+				lockedProfileIds.delete(profileId);
+				continue;
+			}
+			const config = settings.profiles[profileId];
+			if (!config) continue;
 			const savedPw = this.loadProfilePassword(profileId);
 			if (!savedPw) continue;
 			try {
-				const config = settings.profiles[profileId]!;
 				await sessionService.unlockProfile(profileId, config, savedPw);
 				lockedProfileIds.delete(profileId);
 			} catch (err) {

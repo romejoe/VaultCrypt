@@ -1,4 +1,4 @@
-import {Editor, MarkdownView, Menu, Notice, Platform, Plugin, TFile} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Platform, Plugin} from 'obsidian';
 import {DEFAULT_SETTINGS, ProfileConfig, VaultCryptSettings, VaultCryptSettingTab} from './settings';
 import {KdbxService, KdbxVersion} from './kdbx-service';
 import {ProfileService} from './profile-service';
@@ -12,6 +12,7 @@ import {buildChipElement} from './chip-component';
 import {revokeAttachmentVideoCache} from './attachment-chip';
 import {buildCopyTextFromSelection} from './clipboard-intercept';
 import {SecretStorageService} from './secret-storage-service';
+import {registerNoteUnlock} from './note-unlock';
 import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
@@ -318,71 +319,7 @@ export default class VaultCryptPlugin extends Plugin {
 			})
 		);
 
-		// Auto-prompt when a note containing {{vc:...}} references is opened
-		this.registerEvent(this.app.workspace.on('file-open', async (file: TFile | null) => {
-			if (!file || file.extension !== 'md') return;
-			const content = await this.app.vault.read(file);
-			const matches = [...content.matchAll(/\{\{vc:([^:}]+)/g)];
-
-			const settings = peek(this.settings$);
-			const lockedProfileIds = new Set(
-				matches
-					.map(m => {
-						const identifierString = (m[1] ?? '').toLowerCase();
-						if (identifierString === '') return null;
-						const profileIdEndIndex = identifierString.indexOf("/");
-
-						const profileId = profileIdEndIndex < 0 ? '' : identifierString.substring(0, profileIdEndIndex);
-						if (profileId in settings.profiles) {
-							return profileId;
-						}
-						return null;
-					})
-					.filter((profileId): profileId is string => !!profileId)
-					.filter(profileId => !this.sessionService.isUnlocked(profileId))
-			);
-
-			if (settings.security.autoUnlock && lockedProfileIds.size > 0) {
-				const beforeAutoUnlock = new Set(lockedProfileIds);
-				const unlockingNotice = new Notice('Unlocking saved profiles...', 0);
-				try {
-					await this.secretStorageService.autoUnlockProfiles(
-						settings, lockedProfileIds, this.sessionService, this.keyringService,
-					);
-				} finally {
-					unlockingNotice.hide();
-				}
-				for (const profileId of beforeAutoUnlock) {
-					if (!lockedProfileIds.has(profileId)) {
-						new Notice(`Profile "${profileId}" unlocked.`);
-					}
-				}
-			}
-
-			// Check if any remaining locked profiles are keyring-managed
-			const hasLockedManagedProfiles = [...lockedProfileIds].some(
-				id => settings.profiles[id]?.managedByKeyring
-			);
-
-			if (hasLockedManagedProfiles && settings.keyringEnabled) {
-				const notice = new Notice('Locked profiles detected. ', 5_000);
-				const btn = notice.messageEl.createEl('button', {text: 'Unlock with keyring'});
-				btn.addEventListener('click', () => {
-					notice.hide();
-					new KeyringUnlockModal(this.app, this).open();
-				});
-			}
-
-			for (const profileId of lockedProfileIds) {
-				if (settings.profiles[profileId]?.managedByKeyring && settings.keyringEnabled) continue;
-				const notice = new Notice(`Profile "${profileId}" is locked. `, 5_000);
-				const btn = notice.messageEl.createEl('button', {text: 'Unlock'});
-				btn.addEventListener('click', () => {
-					notice.hide();
-					new UnlockModal(this.app, this, profileId).open();
-				});
-			}
-		}));
+		registerNoteUnlock(this);
 
 		// CodeMirror extension for source / live preview decoration
 		this.registerEditorExtension(buildEditorExtension(this));

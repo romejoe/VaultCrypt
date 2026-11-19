@@ -6,6 +6,19 @@ The unindexed-folder cases reproduce [issue #81](https://github.com/romejoe/Vaul
 Tests also cover nested directory creation, file collisions, concurrent folder
 creation, and disk errors.
 
+Missing-reference checks cover [issue #96](https://github.com/romejoe/VaultCrypt/issues/96).
+They exercise the creation form and real session service for nested paths,
+explicit and default custom fields, existing entries, cancellation, locked
+profiles, storage failures, and concurrent creation. Chip checks verify the
+creation control in compact and expanded modes and the context menu actions.
+
+Auto-unlock checks cover the restored active note, switching notes, remembered
+keyring and profile passwords (including keyring-managed profiles), fallback
+after keyring failures, and disabled auto-unlock. They also check duplicate
+events, overlapping note opens, read failures, saved-password retention on
+storage errors, and cleanup during unload. Secret storage and workspace events
+use an in-memory host; no real saved credentials or vault notes are accessed.
+
 The chip-update cases reproduce [issue #59](https://github.com/romejoe/VaultCrypt/issues/59).
 They use the real session service, KDBX entry data, signals, chip templates, and
 editor widgets with DOM/template and CodeMirror mounting mocks. They cover entry
@@ -104,6 +117,11 @@ Do not use a production vault for file-collision or missing-directory checks.
   moves are rolled back, and configured paths remain at the original location.
 - Disable and enable the plugin repeatedly; confirm commands and chip actions
   are not duplicated and there are no console errors.
+- Enable **Auto-unlock on file open**, unlock a test profile with **Remember
+  password**, then restart with a note referencing that profile open. Confirm
+  it unlocks automatically. Lock it and switch to another note referencing it;
+  confirm it unlocks again. Repeat for a keyring-managed profile with only its
+  own password remembered, then with only the keyring password remembered.
 - Check an already-open note in live preview and reading mode, including secret
   tokens in a table. Confirm chips render, unlock, reveal, and copy as before.
 - Reveal duplicate references to a test field in both modes. Edit through
@@ -111,6 +129,12 @@ Do not use a production vault for file-collision or missing-directory checks.
   immediately, including selection-copy text and long-value tooltips. Masked
   references must stay masked. Remove and restore a field and confirm its error
   chip recovers without toggling mask/unmask.
+- Insert a token pointing to a missing nested entry. Unlock and reveal it,
+  then select **Create and edit** or right-click and select **Create entry**.
+  Confirm the form uses the token's path and field, cancellation creates nothing,
+  and saving makes every reference resolve without changing the note. Repeat
+  with **Compact chips** enabled, a custom default field, an explicit custom
+  field, and a missing field on an existing entry.
 - With **Auto unmask chips** enabled, click revealed chip padding, Edit, Copy,
   and the lock icon. Confirm the chip stays rendered and Edit opens its input.
   Repeat with **Compact chips** on and off and after manually revealing a chip.

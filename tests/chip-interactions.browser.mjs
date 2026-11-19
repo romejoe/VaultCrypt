@@ -40,7 +40,7 @@ const {outputFiles} = await build({
       window.logs = [];
       const settings = {profiles: {test: {defaultField: 'Password', path: 'test.kdbx'}}, general: {compactChips: false, autoUnmask: true, saveOnBlur: false, ...options}, security: {clipboardClearSeconds: 0}};
       window.copied = null; window.saved = null; window.savedAttachment = null;
-      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => 'sample value', getEntryFields: () => ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
+      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => options.missing ? null : 'sample value', getEntryFields: () => options.missing ? null : ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
       view = new EditorView({parent: document.querySelector('#editor'), state: EditorState.create({doc: 'Before {{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}} after', extensions: [editorLivePreviewField, buildEditorExtension(plugin), EditorView.updateListener.of(update => { if (update.selectionSet) window.logs.push({event: 'CM selection', head: update.state.selection.main.head}); })]})});
       view.focus();
       tick();
@@ -79,7 +79,10 @@ const {outputFiles} = await build({
           };
         }
       }
-      export class EditSecretModal {} export class DeleteSecretModal {}
+      export class EditSecretModal {
+        constructor(app, plugin, profileId, entryPath, token) {this.reference = {profileId, entryPath, raw: token.raw};}
+        open() {window.openedEntry = this.reference;}
+      } export class DeleteSecretModal {}
     `, resolveDir: process.cwd()}));
   }}]
 });
@@ -115,6 +118,13 @@ try {
       await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
+    }
+    for (const table of [false,true]) for (const compactChips of [false,true]) {
+      await evaluate(`window.openedEntry=null;window.reset(${JSON.stringify({table,compactChips,missing:true})})`);await delay(50);
+      await click('[title="Create and edit"]');
+      assert.deepEqual(await evaluate('window.openedEntry'),{profileId:'test',entryPath:'entry',raw:'{{vc:test/entry}}'});
+      if (table) assert.equal(await evaluate('window.tableActivations'),0);
+      console.log(`PASS missing entry creation control: table=${table}, compact=${compactChips}`);
     }
     for (const table of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({table,attachment:true})})`);await delay(50);

@@ -12,7 +12,15 @@ const mocks = {
 		export class TFile {}
 		export class TFolder {}
 		export class Notice {}
-		export class Menu {}
+		export class Menu {
+			static last; items = [];
+			constructor() { Menu.last = this; }
+			addItem(callback) {
+				const item = {setTitle(title) {this.title = title; return this;}, setIcon() {return this;}, onClick(callback) {this.click = callback; return this;}};
+				callback(item); this.items.push(item);
+			}
+			addSeparator() {} showAtMouseEvent() {}
+		}
 		export const Platform = {isDesktop: false};
 		export const editorLivePreviewField = Symbol();
 	`,
@@ -34,7 +42,11 @@ const mocks = {
 		}};
 	`,
 	'@codemirror/autocomplete': 'export const autocompletion = () => [];',
-	'./modals': 'export class UnlockModal {} export class EditSecretModal {} export class DeleteSecretModal {}',
+	'./modals': `export class UnlockModal {} export class EditSecretModal {
+		static opened = [];
+		constructor(...args) {this.args = args;}
+		open() {EditSecretModal.opened.push(this);}
+	} export class DeleteSecretModal {}`,
 	'./attachment-chip': 'export const ATTACHMENT_PREFIX = "@"; export function buildAttachmentChipElement() {}',
 	'lit-html': `
 		export const nothing = '';
@@ -61,6 +73,8 @@ const {outputFiles} = await build({
 			export {buildEditorExtension, refreshChipsEffect} from './src/editor-extension.ts';
 			export {signal, tick} from '@maverick-js/signals';
 			export {TFile} from 'obsidian';
+			export {Menu} from 'obsidian';
+			export {EditSecretModal} from './modals';
 			import kdbxweb from 'kdbxweb';
 			export const {Kdbx, KdbxCredentials, ProtectedValue} = kdbxweb;
 		`,
@@ -83,7 +97,7 @@ const {outputFiles} = await build({
 const module = {exports: {}};
 new Function('require', 'module', 'exports', outputFiles[0].text)(require, module, module.exports);
 const {UnlockSessionService, buildChipElement, CHIP_DESTROY_EVENT, parseVcTokens, buildEditorExtension, refreshChipsEffect,
-	signal, tick, TFile, Kdbx, KdbxCredentials, ProtectedValue} = module.exports;
+	signal, tick, TFile, Menu, EditSecretModal, Kdbx, KdbxCredentials, ProtectedValue} = module.exports;
 
 globalThis.document = {
 	created: 0,
@@ -119,7 +133,8 @@ function click(root, precedingText) {
 	tick();
 }
 
-async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
+async function fixture(t, {autoUnmask = true, compactChips = false, write = async () => {}} = {}) {
+	EditSecretModal.opened.length = 0;
 	const db = Kdbx.create(new KdbxCredentials(ProtectedValue.fromString('test')), 'test');
 	t.mock.method(Kdbx, 'load', async () => db);
 	t.mock.method(db, 'save', async () => new ArrayBuffer(0));
@@ -135,7 +150,7 @@ async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
 	const state = signal({profiles: [{id: 'test', isLocked: false}, {id: 'locked', isLocked: true}]});
 	const plugin = {
 		app, sessionService: service,
-		settings$: signal({profiles: {test: config, locked: config}, general: {autoUnmask, compactChips: false}}),
+		settings$: signal({profiles: {test: config, locked: config}, general: {autoUnmask, compactChips}}),
 		vaultCryptState$: state,
 	};
 	const chips = [];
@@ -150,6 +165,41 @@ async function fixture(t, {autoUnmask = true, write = async () => {}} = {}) {
 	});
 	return {service, chip, state, plugin};
 }
+
+for (const compactChips of [false, true]) {
+	for (const raw of ['{{vc:test/Missing/Nested#ApiKey}}', '{{vc:test/Entry#MissingField}}']) {
+		test(`missing references open the entry form: compact=${compactChips}, ${raw}`, async t => {
+			const {chip, plugin} = await fixture(t, {compactChips});
+			const root = chip(raw);
+			assert.equal(root.className, 'vaultcrypt-chip vaultcrypt-chip-masked-error');
+			click(root, 'title="Create and edit"');
+			assert.equal(EditSecretModal.opened.length, 1);
+			const [, modalPlugin, profileId, entryPath, token] = EditSecretModal.opened[0].args;
+			assert.equal(modalPlugin, plugin);
+			assert.equal(profileId, 'test');
+			assert.equal(entryPath, parseVcTokens(raw)[0].entryPath);
+			assert.equal(token.raw, raw);
+		});
+	}
+}
+
+test('context menus offer creation for missing entries and editing and deletion for existing entries', async t => {
+	const {chip} = await fixture(t);
+	for (const [raw, expected, absent] of [
+		['{{vc:test/Missing}}', 'Create entry', ['Edit entry', 'Delete entry']],
+		['{{vc:test/Entry}}', 'Edit entry', ['Create entry']],
+		['{{vc:locked/Missing}}', 'Copy reference', ['Create entry', 'Edit entry', 'Delete entry']],
+	]) {
+		chip(raw).dispatchEvent(new Event('contextmenu'));
+		const titles = Menu.last.items.map(item => item.title);
+		assert.ok(titles.includes(expected));
+		for (const title of absent) assert.equal(titles.includes(title), false);
+		if (expected !== 'Copy reference') {
+			Menu.last.items.find(item => item.title === expected).click();
+			assert.equal(EditSecretModal.opened.at(-1).args[4].raw, raw);
+		}
+	}
+});
 
 test('entry edits update every revealed reference, its display and selection-copy value', async t => {
 	const {service, chip} = await fixture(t);
