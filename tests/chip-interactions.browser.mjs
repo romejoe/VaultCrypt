@@ -50,6 +50,12 @@ const {outputFiles} = await build({
         const range=document.createRange();range.selectNode(document.querySelector('[data-vc-chip]'));
         return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
       };
+      window.copyMixedSelection = (markup,value='S',selector=null) => {
+        const container=document.createElement('div');container.innerHTML=markup;
+        container.querySelectorAll('[data-vc-chip]').forEach(chip=>{chip.dataset.vcCopyText=value;});
+        const range=document.createRange();range.selectNodeContents(selector?container.querySelector(selector):container);
+        return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
+      };
       view = new EditorView({parent: document.querySelector('#editor'), state: EditorState.create({doc: 'Before {{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}} after', extensions: [editorLivePreviewField, buildEditorExtension(plugin), EditorView.updateListener.of(update => { if (update.selectionSet) window.logs.push({event: 'CM selection', head: update.state.selection.main.head}); })]})});
       view.focus();
       tick();
@@ -128,6 +134,24 @@ try {
       for(let i=1;i<=8;i++){await cdp('Input.dispatchMouseEvent',{type:'mouseMoved',x:x+width*i/8,y,button:'left',buttons:1});await delay(20);}
       await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:x+width,y,button:'left',clickCount:1});await delay(50);
     }
+    for (const [markup,value,expected,selector] of [
+      ['A<span data-vc-chip>label</span><br>B','S','AS\nB'],
+      ['<p>A<span data-vc-chip>label</span></p><p>B</p>','S','AS\n\nB'],
+      ['<p>A<span data-vc-chip>label</span></p>\n<p>B</p>','S','AS\n\nB'],
+      ['<div>A<span data-vc-chip>label</span></div><div>B</div>','S','AS\nB'],
+      ['<ul><li>A<span data-vc-chip>label</span></li><li>B</li></ul>','S','AS\nB'],
+      ['<table><tr><td>A</td><td><span data-vc-chip>label</span></td><td></td></tr><tr><td>B</td><td>C</td><td>D</td></tr></table>','S','A\tS\t\nB\tC\tD'],
+      ['<table><tr><td>A</td><td><span data-vc-chip>label</span></td></tr></table>','S','A\tS','tr'],
+      ['<table><tr>\n<td>A</td>\n<td><span data-vc-chip>label</span></td>\n</tr></table>','S','A\tS','tr'],
+      ['<p><span data-vc-chip>label</span></p>','\nS\n','\nS\n'],
+      ['<pre>A\n<span data-vc-chip>label</span>\nB\n</pre>','S','A\nS\nB\n'],
+      ['<p>A<span data-vc-chip>label</span></p><p>B</p>','','A\n\nB'],
+      ['<p>plain text</p><p>without chips</p>','S',null],
+      ['<p>{{vc:test/entry}}</p><p>B</p>','S','{{vc:test/entry}}\n\nB'],
+    ]) {
+      assert.equal(await evaluate(`window.copyMixedSelection(${JSON.stringify(markup)},${JSON.stringify(value)},${JSON.stringify(selector??null)})`),expected);
+    }
+    console.log('PASS mixed-content selection preserves line, paragraph and table boundaries');
     for (const table of [false,true]) {
       await evaluate(`window.reset(${JSON.stringify({table})})`);await delay(50);
       await click('[title="Edit"]');

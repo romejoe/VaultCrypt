@@ -419,6 +419,7 @@ export class EditSecretModal extends Modal {
 		for (const cf of this.customFields) {
 			if (!cf.key) return 'Custom field key cannot be empty';
 			if (!VALID_TOKEN_SEGMENT.test(cf.key)) return `"${cf.key}" can only contain letters, digits, hyphens, underscores, periods, and colons`;
+			if (cf.key.startsWith(ATTACHMENT_PREFIX)) return `"${ATTACHMENT_PREFIX}" is reserved for attachment references`;
 			if (reserved.has(cf.key)) return `"${cf.key}" is a reserved field name`;
 			if (seen.has(cf.key)) return `Duplicate custom field key: "${cf.key}"`;
 			seen.add(cf.key);
@@ -450,12 +451,12 @@ export class EditSecretModal extends Modal {
 				return;
 			}
 
-			const fields: Record<string, string> = {
+			const fields = Object.assign(Object.create(null) as Record<string, string>, {
 				UserName: this.fieldUserName,
 				Password: this.fieldPassword,
 				URL: this.fieldURL,
 				Notes: this.fieldNotes,
-			};
+			});
 			for (const cf of this.customFields) {
 				if (cf.key) fields[cf.key] = cf.value;
 			}

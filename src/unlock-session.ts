@@ -56,6 +56,7 @@ export class UnlockSessionService {
 	private readonly unlockCallbacks: UnlockCallback[] = [];
 	private readonly fieldRevision$ = signal(0);
 	private readonly mutations = new ProfileMutationQueue();
+	private lockGeneration = 0;
 
 	constructor(private readonly app: App) {
 	}
@@ -66,11 +67,16 @@ export class UnlockSessionService {
 		if (this.openDbs.has(profileId)) {
 			this.lockProfile(profileId);
 		}
+		const generation = this.lockGeneration;
 		const buffer = await readKdbxFile(this.app, config.path);
 		const credentials = new kdbxweb.KdbxCredentials(
 			kdbxweb.ProtectedValue.fromString(password)
 		);
 		const db = await kdbxweb.Kdbx.load(buffer, credentials);
+		if (generation !== this.lockGeneration) {
+			db.cleanup();
+			throw new Error('Unlock cancelled because profiles were locked.');
+		}
 		this.openDbs.set(profileId, db);
 		this.scheduleAutoLock(profileId, config.autoLockMinutes);
 		this.emitUnlock(profileId);
@@ -111,9 +117,15 @@ export class UnlockSessionService {
 
 	/** Locks all currently unlocked profiles. */
 	lockAll(): void {
+		this.lockGeneration++;
 		for (const profileId of this.openDbs.keys()) {
 			this.lockProfile(profileId);
 		}
+	}
+
+	/** Identifies unlock work invalidated by a subsequent lockAll(). */
+	getLockGeneration(): number {
+		return this.lockGeneration;
 	}
 
 	/** Returns the open Kdbx database for a profile, or null if locked. */
@@ -219,7 +231,7 @@ export class UnlockSessionService {
 		if (!db) return null;
 		const entry = this.resolveEntry(db, entryPath);
 		if (!entry) return null;
-		const result: Record<string, string> = {};
+		const result = Object.create(null) as Record<string, string>;
 		for (const [key, value] of entry.fields) {
 			if (value === undefined || value === null) continue;
 			result[key] = value instanceof kdbxweb.ProtectedValue ? value.getText() : value;

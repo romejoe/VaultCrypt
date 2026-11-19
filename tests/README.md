@@ -23,6 +23,15 @@ after keyring failures, and disabled auto-unlock. They also check duplicate
 events, overlapping note opens, read failures, saved-password retention on
 storage errors, and cleanup during unload. Secret storage and workspace events
 use an in-memory host; no real saved credentials or vault notes are accessed.
+Further race checks pause note, keyring, and profile reads to verify that
+unload or **Lock all** prevents late unlocks and password fallback. Notices use
+the current session state when another profile finishes unlocking.
+
+Field-name checks cover periods, colons, and `__proto__` across both forms,
+reference selection, and real KDBX reopening. Custom field names cannot use
+the reserved `attachment:` prefix. Mixed-content browser copy checks preserve
+explicit line breaks, paragraph/list boundaries, table tabs and rows, and
+newlines within secret values, including formatted HTML between blocks.
 
 The chip-update cases reproduce [issue #59](https://github.com/romejoe/VaultCrypt/issues/59).
 They use the real session service, KDBX entry data, signals, chip templates, and

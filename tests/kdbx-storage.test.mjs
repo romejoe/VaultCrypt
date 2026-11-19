@@ -115,7 +115,7 @@ for (const version of [3, 4]) {
 		db.closeDatabase();
 		const service = new UnlockSessionService(app);
 		const config = {path, autoLockMinutes: 0};
-		const fields = {Password: '', UserName: '', URL: '', Notes: '', ApiKey: ''};
+		const fields = Object.fromEntries(['Password', 'UserName', 'URL', 'Notes', 'ApiKey', '__proto__'].map(key => [key, '']));
 		await service.unlockProfile('test', config, 'test');
 		await service.createEntryWithFields('test', 'Entry', fields, path);
 		service.lockAll();
@@ -131,6 +131,10 @@ for (const version of [3, 4]) {
 		assert.equal(service.getFieldValue('test', 'Entry', 'Title'), 'Entry');
 		assert.equal(service.getFieldValue('test', 'Entry', 'Missing'), null);
 		service.lockAll();
+		await db.openDatabase(path, 'test');
+		assert.equal(Object.prototype.hasOwnProperty.call(db.getEntry('Entry').fields, '__proto__'), true);
+		assert.equal(db.getEntry('Entry').fields.__proto__, '');
+		db.closeDatabase();
 	});
 }
 

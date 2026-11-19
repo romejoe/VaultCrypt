@@ -32,7 +32,7 @@ const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, 
 				removeClass(cls) { this.classes.delete(cls); }
 			}
 			class Control {
-				inputEl = {}; selectEl = {empty: () => {this.options = {};}}; value = ''; options = {};
+				inputEl = {}; selectEl = {empty: () => {this.options = Object.create(null);}}; value = ''; options = Object.create(null);
 				setValue(value) { this.value = value; return this; }
 				setPlaceholder() { return this; }
 				setDisabled(value) { this.disabled = value; return this; }
@@ -176,6 +176,8 @@ for (const options of [
 	{},
 	{raw: '{{vc:test/Entry#UserName}}'},
 	{raw: '{{vc:test/Entry#Api.Token}}'},
+	{raw: '{{vc:test/Entry#Api:Token}}'},
+	{raw: '{{vc:test/Entry#__proto__}}'},
 	{raw: '{{vc:test/Entry}}', defaultField: 'ApiKey'},
 ]) {
 	test(`creates the referenced entry and field: ${JSON.stringify(options)}`, async t => {
@@ -198,6 +200,57 @@ for (const options of [
 		assert.equal(f.modal.closed, true);
 		assert.equal(f.plugin.refreshes, 1);
 		assert.ok(Notice.messages.includes('Entry created'));
+	});
+}
+
+for (const key of ['Api.Token', 'Api:Token', '__proto__']) {
+	test(`custom field ${key} can be inserted, selected and reopened in the edit form`, async t => {
+		const f = await fixture(t);
+		const insert = f.openInsert();
+		insert.selectNewEntry('Group');
+		f.edit('Entry name (required)', 'Entry');
+		Setting.instances.flatMap(row => row.controls).find(control => control.text === 'Add custom field').click();
+		const custom = Setting.instances.find(row => row.parent === insert.customFieldsContainerEl);
+		custom.controls[0].change(key);
+		custom.controls[1].change('value');
+		f.row('Reference field').controls[0].change(key);
+		await insert.submit();
+		assert.equal(insert.closed, true);
+		assert.equal(f.service.getFieldValue('test', 'Group/Entry', key), 'value');
+		const fields = f.service.getEntryFields('test', 'Group/Entry');
+		assert.equal(Object.prototype.hasOwnProperty.call(fields, key), true);
+		assert.equal(fields[key], 'value');
+		Setting.instances.length = 0;
+		const reference = parseVcTokens(f.inserted[0])[0];
+		const edit = new EditSecretModal(f.app, f.plugin, 'test', reference.entryPath, reference);
+		edit.open();
+		assert.ok(Setting.instances.some(row => row.controls[0]?.value === key && row.controls[1]?.value === 'value'));
+		await edit.submit();
+		assert.equal(f.service.getFieldValue('test', 'Group/Entry', key), 'value');
+		Setting.instances.length = 0;
+		const picker = f.openInsert();
+		picker.selectEntry('Group/Entry');
+		assert.equal(Object.prototype.hasOwnProperty.call(f.row('Reference field').controls[0].options, key), true);
+	});
+}
+
+for (const form of ['edit', 'insert']) {
+	test(`${form} rejects the reserved attachment prefix in custom field names`, async t => {
+		const f = await fixture(t, {raw: '{{vc:test/Entry#ApiKey}}'});
+		let modal = f.modal;
+		if (form === 'insert') {
+			modal = f.openInsert();
+			modal.selectNewEntry('');
+			f.edit('Entry name (required)', 'Entry');
+			Setting.instances.flatMap(row => row.controls).find(control => control.text === 'Add custom field').click();
+		}
+		const custom = Setting.instances.find(row => row.parent === modal.customFieldsContainerEl);
+		custom.controls[0].change('attachment:ApiKey');
+		custom.controls[1].change('must not save');
+		await modal.submit();
+		assert.match(modal.errorEl.textContent, /reserved for attachment references/);
+		assert.equal(modal.closed, false);
+		assert.equal(f.writes(), 0);
 	});
 }
 

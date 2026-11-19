@@ -113,7 +113,11 @@ export class SecretStorageService {
 		lockedProfileIds: Set<string>,
 		sessionService: UnlockSessionService,
 		keyringService: KeyringService,
+		isActive: () => boolean = () => true,
 	): Promise<void> {
+		const generation = sessionService.getLockGeneration();
+		const cancelled = () => !isActive() || sessionService.getLockGeneration() !== generation;
+		if (cancelled()) return;
 		// Try keyring first (unlocks all managed profiles in one KDBX open)
 		if (settings.keyringEnabled) {
 			const savedKeyringPw = this.loadKeyringPassword();
@@ -127,6 +131,7 @@ export class SecretStorageService {
 							settings.masterKeyringPath, savedKeyringPw, managedLocked,
 						);
 						for (const [profileId, profilePassword] of passwords) {
+							if (cancelled()) return;
 							if (sessionService.isUnlocked(profileId)) {
 								lockedProfileIds.delete(profileId);
 								continue;
@@ -135,12 +140,14 @@ export class SecretStorageService {
 							if (!config) continue;
 							try {
 								await sessionService.unlockProfile(profileId, config, profilePassword);
+								if (cancelled()) return;
 								lockedProfileIds.delete(profileId);
 							} catch {
 								// Stale keyring entry — leave in locked set to prompt manually
 							}
 						}
 					} catch (err) {
+						if (cancelled()) return;
 						if (isInvalidKeyError(err)) {
 							this.forgetKeyringPassword();
 						}
@@ -154,6 +161,7 @@ export class SecretStorageService {
 		// when "Use keyring master password" was turned off in the unlock dialog).
 		// Use it if keyring unlocking was unavailable or unsuccessful.
 		for (const profileId of [...lockedProfileIds]) {
+			if (cancelled()) return;
 			if (sessionService.isUnlocked(profileId)) {
 				lockedProfileIds.delete(profileId);
 				continue;
@@ -164,8 +172,10 @@ export class SecretStorageService {
 			if (!savedPw) continue;
 			try {
 				await sessionService.unlockProfile(profileId, config, savedPw);
+				if (cancelled()) return;
 				lockedProfileIds.delete(profileId);
 			} catch (err) {
+				if (cancelled()) return;
 				if (isInvalidKeyError(err)) {
 					this.forgetProfilePassword(profileId);
 				}

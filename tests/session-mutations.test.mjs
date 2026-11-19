@@ -216,3 +216,37 @@ test('queued mutations reject if the profile was locked and reopened', async t =
 	assert.equal(service.getDatabase('test'), reopened);
 	assert.equal(service.getEntryFields('test', 'Entry'), null);
 });
+
+for (const stage of ['read', 'decrypt']) {
+	test(`lockAll cancels an unlock waiting for ${stage} and permits a later unlock`, async t => {
+		const {service, databases} = await fixture(t);
+		service.lockAll();
+		const pending = deferred(), started = deferred();
+		const db = databases.get('test.kdbx');
+		const cleanups = t.mock.method(db, 'cleanup');
+		const unlocks = [];
+		service.onUnlock(id => unlocks.push(id));
+		if (stage === 'read') {
+			const read = service.app.vault.readBinary;
+			t.mock.method(service.app.vault, 'readBinary', async file => {
+				started.resolve(); await pending.promise; return read(file);
+			});
+		} else {
+			t.mock.method(kdbxweb.Kdbx, 'load', async () => {
+				started.resolve(); await pending.promise; return db;
+			});
+		}
+		const opening = service.unlockProfile('test', {path: 'test.kdbx', autoLockMinutes: 0}, 'test');
+		const rejected = assert.rejects(opening, /Unlock cancelled/);
+		await started.promise;
+		service.lockAll();
+		pending.resolve();
+		await rejected;
+		assert.equal(service.isUnlocked('test'), false);
+		assert.deepEqual(unlocks, []);
+		assert.equal(cleanups.mock.callCount(), 1);
+		await service.unlockProfile('test', {path: 'test.kdbx', autoLockMinutes: 0}, 'test');
+		assert.equal(service.isUnlocked('test'), true);
+		assert.deepEqual(unlocks, ['test']);
+	});
+}

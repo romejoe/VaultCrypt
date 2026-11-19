@@ -45,6 +45,7 @@ function fixture(t, {autoUnlock = true, managed = true, keyringEnabled = true} =
 		vault: {read: async file => {reads.push(file.path); return contents.get(file.path) ?? ''; }},
 	};
 	const sessionService = {
+		getLockGeneration: () => 0,
 		isUnlocked: id => unlocked.has(id),
 		unlockProfile: async (id, config, password) => {
 			unlocks.push(id);
@@ -244,3 +245,51 @@ test('unloading during a note read prevents auto-unlock and notifications', asyn
 	assert.deepEqual(f.unlocks, []);
 	assert.deepEqual(Notice.instances, []);
 });
+
+test('profiles relocked during another unlock get a manual action instead of a false success notice', async t => {
+	const f = fixture(t, {managed: false});
+	f.settings.profiles.other = {path: 'other.kdbx', managedByKeyring: false};
+	f.saved.saveProfilePassword('test', 'profile-password');
+	f.saved.saveProfilePassword('other', 'profile-password');
+	const unlock = f.sessionService.unlockProfile;
+	let finish, started;
+	const gate = new Promise(resolve => {finish = resolve;});
+	const beginning = new Promise(resolve => {started = resolve;});
+	t.mock.method(f.sessionService, 'unlockProfile', async (...args) => {
+		if (args[0] === 'other') {started(); await gate;}
+		await unlock(...args);
+	});
+	const opening = f.open('two.md', '{{vc:test/Entry}} {{vc:other/Entry}}');
+	await beginning;
+	f.unlocked.delete('test');
+	finish();
+	await opening;
+	assert.equal(Notice.instances.some(notice => notice.message === 'Profile "test" unlocked.'), false);
+	assert.equal(Notice.instances.some(notice => notice.message === 'Profile "other" unlocked.'), true);
+	assert.equal(Notice.instances.some(notice => notice.message === 'Profile "test" is locked. '), true);
+	assert.deepEqual(f.buttons(), ['Unlock']);
+});
+
+for (const reason of ['unload', 'lockAll']) {
+	test(`${reason} during keyring opening prevents profile unlocks and fallback`, async t => {
+		const f = fixture(t);
+		f.saved.saveKeyringPassword('keyring-password');
+		f.saved.saveProfilePassword('test', 'profile-password');
+		let finish, started, generation = 0;
+		const gate = new Promise(resolve => {finish = resolve;});
+		const beginning = new Promise(resolve => {started = resolve;});
+		t.mock.method(f.sessionService, 'getLockGeneration', () => generation);
+		t.mock.method(f.keyringService, 'getProfilePasswords', async () => {
+			started(); await gate; return new Map([['test', 'profile-password']]);
+		});
+		const opening = f.open();
+		await beginning;
+		if (reason === 'unload') f.unload();
+		else generation++;
+		finish();
+		await opening;
+		assert.deepEqual(f.unlocks, []);
+		assert.equal(f.saved.loadKeyringPassword(), 'keyring-password');
+		assert.equal(f.saved.loadProfilePassword('test'), 'profile-password');
+	});
+}

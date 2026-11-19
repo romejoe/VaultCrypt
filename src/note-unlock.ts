@@ -47,14 +47,19 @@ async function unlockNoteProfiles(plugin: VaultCryptPlugin, file: TFile, isActiv
 		const notice = new Notice('Unlocking saved profiles...', 0);
 		try {
 			await plugin.secretStorageService.autoUnlockProfiles(
-				settings, lockedProfileIds, plugin.sessionService, plugin.keyringService,
+				settings, lockedProfileIds, plugin.sessionService, plugin.keyringService, isActive,
 			);
 		} finally {
 			notice.hide();
 		}
 		if (!isActive()) return;
 		for (const id of beforeAutoUnlock) {
-			if (!lockedProfileIds.has(id)) new Notice(`Profile "${id}" unlocked.`);
+			if (plugin.sessionService.isUnlocked(id)) {
+				lockedProfileIds.delete(id);
+				new Notice(`Profile "${id}" unlocked.`);
+			} else {
+				lockedProfileIds.add(id);
+			}
 		}
 	}
 
