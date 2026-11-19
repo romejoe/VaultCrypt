@@ -16,7 +16,8 @@ import {checkVerifiedVaultFiles, isImportableVaultPath, verifyVaultForImport, ty
  */
 export class ProfileService {
 	private movingVaultDir = false;
-	private readonly pendingProfiles = new Map<string, string>();
+	private readonly pendingProfiles = new Map<string, {path: string; importing?: boolean}>();
+	private readonly pendingImportSaves = new Set<Promise<void>>();
 
 	constructor(
 		private settings: ReadSignal<DeepReadonly<VaultCryptSettings>>,
@@ -92,6 +93,7 @@ export class ProfileService {
 		if (this.movingVaultDir) throw new Error('The storage directory is already being moved.');
 		this.movingVaultDir = true;
 		try {
+			if (this.pendingImportSaves.size > 0) await Promise.allSettled(this.pendingImportSaves);
 			await this.migrateVaultDir(newDir);
 		} finally {
 			this.movingVaultDir = false;
@@ -220,7 +222,10 @@ export class ProfileService {
 		if (Object.values(settings.profiles).some(profile => profile.path === path)) {
 			throw new Error(`This file is already registered: ${path}`);
 		}
-		this.pendingProfiles.set(key, path);
+		if ([...this.pendingProfiles.values()].some(profile => profile.path === path)) {
+			throw new Error(`A profile is being registered at this path: ${path}`);
+		}
+		this.pendingProfiles.set(key, {path});
 		try {
 			await this.kdbxService.createDatabase(path, password, version);
 			this.kdbxService.closeDatabase();
@@ -233,7 +238,12 @@ export class ProfileService {
 	}
 
 	/** Register existing databases together after verifying the selected files. */
-	async importVaults(directory: string, selections: VaultImportSelection[], signal: AbortSignal): Promise<void> {
+	async importVaults(
+		directory: string,
+		selections: VaultImportSelection[],
+		signal: AbortSignal,
+		saveProfiles: (profiles: Record<string, ProfileConfig>) => Promise<void>,
+	): Promise<void> {
 		this.validateVaultImport(directory, selections);
 		const imported: Record<string, ProfileConfig> = {};
 		const verified = [];
@@ -248,9 +258,17 @@ export class ProfileService {
 		signal.throwIfAborted();
 		// Profiles and directory settings can change while verifying the selected files.
 		this.validateVaultImport(directory, selections);
-		this.patchSettings(settings => {
-			Object.assign(settings.profiles, imported);
-		});
+		for (const [name, {path}] of Object.entries(imported)) {
+			this.pendingProfiles.set(name, {path, importing: true});
+		}
+		const saving = Promise.resolve().then(() => saveProfiles(imported));
+		this.pendingImportSaves.add(saving);
+		try {
+			await saving;
+		} finally {
+			this.pendingImportSaves.delete(saving);
+			for (const name of Object.keys(imported)) this.pendingProfiles.delete(name);
+		}
 	}
 
 	private validateVaultImport(directory: string, selections: VaultImportSelection[]): void {
@@ -259,15 +277,18 @@ export class ProfileService {
 			throw new Error('The storage directory is changing or has changed. Scan again to import vaults.');
 		}
 		const names = [...Object.keys(settings.profiles), ...this.pendingProfiles.keys()];
-		const pendingPaths = new Set(this.pendingProfiles.values());
 		const paths = new Set(Object.values(settings.profiles).map(profile => profile.path));
+		const pendingCreations = new Set<string>();
+		for (const {path, importing} of this.pendingProfiles.values()) {
+			(importing ? paths : pendingCreations).add(path);
+		}
 		for (const {name, path, password} of selections) {
 			const nameError = validateProfileName(name, names);
 			if (nameError) throw new Error(`${path}: ${nameError}`);
 			if (!isImportableVaultPath(path, directory, settings.masterKeyringPath)) {
 				throw new Error(`This file cannot be imported: ${path}`);
 			}
-			if (pendingPaths.has(path)) throw new Error(`A profile is being created at this path: ${path}`);
+			if (pendingCreations.has(path)) throw new Error(`A profile is being created at this path: ${path}`);
 			if (paths.has(path)) throw new Error(`This file is already selected or registered: ${path}`);
 			if (!password) throw new Error(`Enter the database password for ${path}.`);
 			names.push(name);

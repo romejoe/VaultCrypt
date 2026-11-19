@@ -366,12 +366,12 @@ export default class VaultCryptPlugin extends Plugin {
 		this.vaultImport = new VaultImportFlow(this);
 		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
 
+		this.dispatchSaveSettings();
 		this.effects = [
 			effect(() => {
-				const settings = this.settings$();
+				this.settings$();
 				this.refreshAllEditorChips();
 				this.app.workspace.getActiveViewOfType(MarkdownView)?.previewMode.rerender(true);
-				this.dispatchSaveSettings(settings);
 			}),
 			effect(() => {
 				const profiles = this.vaultCryptState$().profiles;
@@ -457,10 +457,6 @@ export default class VaultCryptPlugin extends Plugin {
 		this._settings$.set(newSettings);
 	}
 
-	private async saveSettings(settings: DeepReadonly<VaultCryptSettings>) {
-		await this.saveData(settings);
-	}
-
 	// ── Profile delegation ────────────────────────────────────────────────────
 
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
@@ -469,7 +465,8 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	async importVaults(directory: string, selections: VaultImportSelection[], signal: AbortSignal): Promise<void> {
-		await this.profileService.importVaults(directory, selections, signal);
+		await this.profileService.importVaults(directory, selections, signal, profiles =>
+			this.saveImportedProfiles(profiles, signal));
 		this.initRuntimeState();
 	}
 
@@ -590,15 +587,39 @@ export default class VaultCryptPlugin extends Plugin {
 		patcher(newSettings);
 
 		this._settings$.set(newSettings);
+		this.dispatchSaveSettings();
 	}
 
-	private dispatchSaveSettings(settings: DeepReadonly<VaultCryptSettings>) {
-		this.pendingSettingsSave = this.pendingSettingsSave.then(() => this.saveSettings(settings)).then(() => {
+	private dispatchSaveSettings(): void {
+		// Read settings when the write starts so it includes any preceding import.
+		void this.queueSettingsSave(() => this.saveData(this.settings)).then(() => {
 			console.debug('[VaultCrypt] Settings saved successfully');
-		}, (err) => {
-			console.error('Error saving settings:', err);
+		}, error => {
+			console.error('Error saving settings:', error);
 			new Notice('Error saving settings. Please check the console for details.');
 		});
+	}
+
+	private saveImportedProfiles(profiles: Record<string, ProfileConfig>, signal: AbortSignal): Promise<void> {
+		return this.queueSettingsSave(async () => {
+			signal.throwIfAborted();
+			const settings = peek(this._settings$);
+			try {
+				await this.saveData({...settings, profiles: {...settings.profiles, ...profiles}});
+			} catch (error) {
+				console.error('[VaultCrypt] Could not save imported profiles', error);
+				throw new Error('Could not save the imported vaults. Try again.');
+			}
+			// Keep settings edits made while the import write was in progress.
+			const current = peek(this._settings$);
+			this._settings$.set({...current, profiles: {...current.profiles, ...profiles}});
+		});
+	}
+
+	private queueSettingsSave(write: () => Promise<void>): Promise<void> {
+		const pending = this.pendingSettingsSave.then(write);
+		this.pendingSettingsSave = pending.catch(() => {});
+		return pending;
 	}
 
 	scheduleClearClipboardTime(value: string, secs: number | undefined) {

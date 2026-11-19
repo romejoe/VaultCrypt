@@ -125,7 +125,7 @@ class VaultImportModal extends Modal {
 		}));
 		const {signal} = this.lifetime;
 		this.submitting = true;
-		this.submitButton.setDisabled(true).setButtonText('Checking passwords...');
+		this.submitButton.setDisabled(true).setButtonText('Importing...');
 		this.errorEl.setText('');
 		try {
 			await this.plugin.importVaults(this.directory, selections, signal);

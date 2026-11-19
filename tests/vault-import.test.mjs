@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signal, Modal, Notice, TFile, scanForVaults, verifyVaultForImport, kdbxweb} =
+const {VaultCryptPlugin, VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, Modal, Notice, TFile, scanForVaults, verifyVaultForImport, kdbxweb} =
 	await loadObsidianRuntime(`
+		export { default as VaultCryptPlugin } from './src/main.ts';
 		export { VaultImportFlow } from './src/modals/vault-import-modal.ts';
 		export { ProfileService } from './src/profile-service.ts';
 		export { KdbxService } from './src/kdbx-service.ts';
 		export { UnlockSessionService } from './src/unlock-session.ts';
 		export { scanForVaults, verifyVaultForImport } from './src/vault-import.ts';
 		export * as kdbxweb from 'kdbxweb';
-		export { signal } from '@maverick-js/signals';
 		export { Modal, Notice, TFile } from 'obsidian';
 	`, {obsidian: `
 		class Element {
@@ -59,10 +59,18 @@ const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signa
 		}
 		export class TFile { constructor(path) { this.path = path; } }
 		export class TFolder {}
+		export class Plugin { constructor(app) { this.app = app; } }
+		export class PluginSettingTab {}
+		export class MarkdownRenderChild {}
+		export class FuzzySuggestModal {}
+		export class MarkdownView {}
+		export class Menu {}
+		export class ButtonComponent extends Control {}
+		export const Platform = {};
+		export const editorLivePreviewField = {};
 	`});
 
 function fixture(t, directory = '.private/vaults') {
-	const settings = signal({general: {vaultCryptDir: directory}, profiles: {}, masterKeyringPath: `${directory}/master.kdbx`});
 	const disk = new Map();
 	const reads = [];
 	const writes = [];
@@ -100,24 +108,24 @@ function fixture(t, directory = '.private/vaults') {
 			},
 		},
 	};
-	const patch = patcher => {
-		const current = structuredClone(settings());
-		patcher(current);
-		settings.set(current);
-	};
-	const kdbx = new KdbxService(app);
-	const service = new ProfileService(settings, app, kdbx, signal({}), patch, () => {});
-	const flow = new VaultImportFlow({
-		app,
-		get settings() { return settings(); },
-		register: callback => cleanup.push(callback),
-		patchSettings: patch,
-		importVaults: service.importVaults.bind(service),
+	const plugin = new VaultCryptPlugin(app);
+	let savedSettings;
+	plugin.saveData = async settings => { savedSettings = structuredClone(settings); };
+	plugin.register = callback => cleanup.push(callback);
+	const patch = plugin.patchSettings.bind(plugin);
+	patch(settings => {
+		settings.general.vaultCryptDir = directory;
+		settings.masterKeyringPath = `${directory}/master.kdbx`;
 	});
+	const kdbx = new KdbxService(app);
+	plugin.sessionService = new UnlockSessionService(app);
+	plugin.profileService = new ProfileService(plugin.settings$, app, kdbx, plugin.vaultCryptState$, patch, plugin.mutateState.bind(plugin));
+	const flow = new VaultImportFlow(plugin);
 	t.after(() => cleanup.forEach(callback => callback()));
 	return {
-		app, directory, settings, disk, reads, writes, listCalls, patch, flow,
-		addProfile: service.addProfile.bind(service),
+		app, directory, settings: () => plugin.settings, disk, reads, writes, listCalls, patch, flow, plugin,
+		get savedSettings() { return savedSettings; },
+		addProfile: plugin.addProfile.bind(plugin),
 		async makeDatabase(path, version) {
 			await kdbx.createDatabase(path, 'existing password', version, {iterations: 2, memory: 32, parallelism: 1});
 			kdbx.closeDatabase();
@@ -127,7 +135,7 @@ function fixture(t, directory = '.private/vaults') {
 			layoutReady();
 			await new Promise(resolve => setImmediate(resolve));
 		},
-		importVaults: (selections, signal = new AbortController().signal) => service.importVaults(directory, selections, signal),
+		importVaults: (selections, signal = new AbortController().signal) => plugin.importVaults(directory, selections, signal),
 	};
 }
 
@@ -180,6 +188,86 @@ test('first run prompts for selected files and a later settings rescan finds cop
 	assert.equal(settingsRefreshed, true);
 	assert.equal(f.settings().profiles['new-'].kdbxVersion, 4);
 	assert.equal(f.settings().profiles['new-'].path, copied);
+});
+
+test('import waits for settings to be saved and can retry a rejected write', async t => {
+	const f = fixture(t);
+	const path = `${f.directory}/retry.kdbx`;
+	await f.makeDatabase(path, 3);
+	let completions = 0;
+	await f.flow.open(() => { completions++; });
+	const modal = Modal.current;
+	const [row, passwordRow, actions] = modal.contentEl.rows;
+	row.controls[0].change('Restored');
+	row.controls[1].change(true);
+	const input = passwordRow.controls[0].inputEl;
+	input.value = 'existing password';
+	const submit = actions.controls[1];
+	const saveData = f.plugin.saveData;
+	t.mock.method(console, 'error', () => {});
+	function pauseImportWrite() {
+		let startWrite, finishWrite, rejectWrite;
+		const writing = new Promise(resolve => { startWrite = resolve; });
+		const save = t.mock.method(f.plugin, 'saveData', async settings => {
+			if (settings.profiles.restored) {
+				await new Promise((resolve, reject) => {
+					finishWrite = resolve;
+					rejectWrite = reject;
+					startWrite();
+				});
+			}
+			await saveData(settings);
+		});
+		return {
+			writing,
+			finish: () => finishWrite(),
+			reject: error => rejectWrite(error),
+			restore: () => save.mock.restore(),
+		};
+	}
+
+	const failedWrite = pauseImportWrite();
+	const submission = submit.click();
+	await Promise.race([failedWrite.writing, submission]);
+	assert.equal(Modal.current, modal);
+	assert.equal(submit.disabled, true);
+	assert.deepEqual(Notice.messages, []);
+	assert.equal(completions, 0);
+	assert.deepEqual(f.settings().profiles, {});
+	assert.deepEqual(f.plugin.vaultCryptState.profiles, []);
+	await assert.rejects(f.addProfile('retry', 'new password', 3), /being registered at this path/);
+	f.patch(settings => { settings.general.compactChips = true; });
+	failedWrite.reject(new Error('Disk unavailable'));
+	await submission;
+
+	assert.match(modal.errorEl.text, /Could not save the imported vaults/);
+	assert.equal(Modal.current, modal);
+	assert.equal(submit.disabled, false);
+	assert.equal(input.value, 'existing password');
+	assert.deepEqual(Notice.messages, []);
+	assert.equal(completions, 0);
+	assert.deepEqual(f.settings().profiles, {});
+	assert.deepEqual(f.savedSettings.profiles, {});
+	assert.equal(f.savedSettings.general.compactChips, true);
+
+	failedWrite.restore();
+	const successfulWrite = pauseImportWrite();
+	const retry = submit.click();
+	await Promise.race([successfulWrite.writing, retry]);
+	assert.equal(Modal.current, modal);
+	assert.deepEqual(Notice.messages, []);
+	f.patch(settings => { settings.general.autoUnmask = true; });
+	successfulWrite.restore();
+	successfulWrite.finish();
+	await retry;
+	assert.equal(f.savedSettings.profiles.restored.path, path);
+	assert.equal(f.plugin.vaultCryptState.profiles[0].path, path);
+	assert.equal(f.savedSettings.general.compactChips, true);
+	assert.equal(f.savedSettings.general.autoUnmask, true);
+	assert.equal(f.settings().general.autoUnmask, true);
+	assert.deepEqual(Notice.messages, ['Imported 1 vault.']);
+	assert.equal(completions, 1);
+	assert.equal(Modal.current, undefined);
 });
 
 test('scan excludes registered files, keyrings, and invalid or unsupported databases', async t => {
