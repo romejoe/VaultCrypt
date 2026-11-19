@@ -6,6 +6,8 @@ import {KdbxService, KdbxVersion} from './kdbx-service';
 import {VaultCryptState} from './types';
 import {peek, ReadSignal} from "@maverick-js/signals";
 import {DeepReadonly} from "./utils";
+import {validateProfileName} from './profile-name';
+import {isImportableVaultPath, readVaultVersion, type VaultImportSelection} from './vault-import';
 
 /**
  * Encapsulates all profile and config-file orchestration.
@@ -13,6 +15,9 @@ import {DeepReadonly} from "./utils";
  * focused on the Obsidian lifecycle (onload / onunload / commands).
  */
 export class ProfileService {
+	private movingVaultDir = false;
+	private pendingProfileNames = new Set<string>();
+
 	constructor(
 		private settings: ReadSignal<DeepReadonly<VaultCryptSettings>>,
 		private app: App,
@@ -84,6 +89,16 @@ export class ProfileService {
 	 * state are updated atomically after a successful migration.
 	 */
 	async moveVaultDir(newDir: string): Promise<void> {
+		if (this.movingVaultDir) throw new Error('The storage directory is already being moved.');
+		this.movingVaultDir = true;
+		try {
+			await this.migrateVaultDir(newDir);
+		} finally {
+			this.movingVaultDir = false;
+		}
+	}
+
+	private async migrateVaultDir(newDir: string): Promise<void> {
 		const settings = peek(this.settings);
 		const oldDir = settings.general.vaultCryptDir;
 		if (oldDir === newDir) return;
@@ -199,18 +214,56 @@ export class ProfileService {
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
 		const key = name.toLowerCase();
 		const settings = peek(this.settings);
+		const nameError = validateProfileName(key, [...Object.keys(settings.profiles), ...this.pendingProfileNames]);
+		if (nameError) throw new Error(nameError);
 		const path = `${settings.general.vaultCryptDir}/${key}.kdbx`;
-		await this.kdbxService.createDatabase(path, password, version);
-		this.kdbxService.closeDatabase();
-		this.patchSettings((newSettings: VaultCryptSettings) => {
-			newSettings.profiles[key] = {
-				path,
-				kdbxVersion: version,
-				autoLockMinutes: 0,
-				defaultField: 'password',
-				managedByKeyring: false,
-			};
+		this.pendingProfileNames.add(key);
+		try {
+			await this.kdbxService.createDatabase(path, password, version);
+			this.kdbxService.closeDatabase();
+			this.patchSettings(settings => {
+				settings.profiles[key] = profileConfig(path, version);
+			});
+		} finally {
+			this.pendingProfileNames.delete(key);
+		}
+	}
+
+	/** Register existing databases together after verifying the selected files. */
+	async importVaults(directory: string, selections: VaultImportSelection[], signal: AbortSignal): Promise<void> {
+		this.validateVaultImport(directory, selections);
+		const imported: Record<string, ProfileConfig> = {};
+		for (const {path, name} of selections) {
+			signal.throwIfAborted();
+			const version = await readVaultVersion(this.app, path);
+			if (version === null) throw new Error(`Unsupported or invalid KDBX database: ${path}`);
+			imported[name.toLowerCase()] = profileConfig(path, version);
+		}
+		signal.throwIfAborted();
+		// Files and settings can change while the picker is open or while reading a header.
+		this.validateVaultImport(directory, selections);
+		this.patchSettings(settings => {
+			Object.assign(settings.profiles, imported);
 		});
+	}
+
+	private validateVaultImport(directory: string, selections: VaultImportSelection[]): void {
+		const settings = peek(this.settings);
+		if (this.movingVaultDir || directory !== settings.general.vaultCryptDir) {
+			throw new Error('The storage directory is changing or has changed. Scan again to import vaults.');
+		}
+		const names = [...Object.keys(settings.profiles), ...this.pendingProfileNames];
+		const paths = new Set(Object.values(settings.profiles).map(profile => profile.path));
+		for (const {name, path} of selections) {
+			const nameError = validateProfileName(name, names);
+			if (nameError) throw new Error(`${path}: ${nameError}`);
+			if (!isImportableVaultPath(path, directory, settings.masterKeyringPath)) {
+				throw new Error(`This file cannot be imported: ${path}`);
+			}
+			if (paths.has(path)) throw new Error(`This file is already selected or registered: ${path}`);
+			names.push(name);
+			paths.add(path);
+		}
 	}
 
 	/** Updates mutable profile settings (auto-lock timeout, default field). */
@@ -243,6 +296,9 @@ export class ProfileService {
 		const newKey = newName.toLowerCase();
 		const settings = peek(this.settings);
 		if (!settings.profiles[oldKey]) throw new Error(`Profile '${oldName}' not found.`);
+		if (oldKey === newKey) return;
+		const nameError = validateProfileName(newKey, [...Object.keys(settings.profiles), ...this.pendingProfileNames]);
+		if (nameError) throw new Error(nameError);
 
 		this.patchSettings((newSettings: VaultCryptSettings) => {
 			const oldProfile = newSettings.profiles[oldKey];
@@ -305,4 +361,8 @@ export class ProfileService {
 			}
 		});
 	}
+}
+
+function profileConfig(path: string, kdbxVersion: KdbxVersion): ProfileConfig {
+	return {path, kdbxVersion, autoLockMinutes: 0, defaultField: 'password', managedByKeyring: false};
 }

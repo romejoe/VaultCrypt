@@ -33,6 +33,7 @@ export interface VaultCryptSettings {
 		saveOnBlur: boolean;
 		autoPreviewAttachments: boolean;
 		hasSeenSyncWarning: boolean;
+		hasScannedForVaults: boolean;
 	};
 }
 
@@ -53,16 +54,9 @@ export const DEFAULT_SETTINGS: VaultCryptSettings = {
 		saveOnBlur: true,
 		autoPreviewAttachments: false,
 		hasSeenSyncWarning: false,
+		hasScannedForVaults: false,
 	}
 };
-
-export function validateProfileName(name: string, existingNames: string[]): string | null {
-	if (!name) return "Profile name is required.";
-	if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(name)) return "Name must start with alphanumeric and contain only letters, numbers, and hyphens.";
-	if (name.length > 64) return "Name must be 64 characters or fewer.";
-	if (existingNames.some(n => n.toLowerCase() === name.toLowerCase())) return "A profile with this name already exists.";
-	return null;
-}
 
 export class VaultCryptSettingTab extends PluginSettingTab {
 	plugin: VaultCryptPlugin;
@@ -84,7 +78,17 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 			.addButton(btn => btn
 				.setButtonText("Add profile")
 				.setCta()
-				.onClick(() => new AddProfileModal(this.app, this.plugin, () => this.display()).open()));
+				.onClick(() => new AddProfileModal(this.app, this.plugin, () => this.display()).open()))
+			.addButton(btn => btn
+				.setButtonText('Import vaults')
+				.onClick(async () => {
+					btn.setDisabled(true);
+					try {
+						await this.plugin.vaultImport.open(() => this.display());
+					} finally {
+						btn.setDisabled(false);
+					}
+				}));
 
 		const profiles = this.plugin.settings.profiles;
 		const profileNames = Object.keys(profiles);
@@ -92,7 +96,7 @@ export class VaultCryptSettingTab extends PluginSettingTab {
 		if (profileNames.length === 0) {
 			new Setting(containerEl)
 				.setName("No profiles configured")
-				.setDesc("Click 'add profile' to get started.");
+				.setDesc('Create a profile or import an existing database.');
 		} else {
 			for (const name of profileNames) {
 				const config = profiles[name]!;

@@ -18,6 +18,8 @@ import {EditorView} from '@codemirror/view';
 import {Extension} from "@codemirror/state";
 import {computed, effect, peek, signal, StopEffect} from "@maverick-js/signals";
 import {deepFreeze, DeepReadonly} from "./utils";
+import {VaultImportFlow} from './modals/vault-import-modal';
+import type {VaultImportSelection} from './vault-import';
 
 export type {VaultCryptProfile, VaultCryptState};
 
@@ -63,6 +65,7 @@ export default class VaultCryptPlugin extends Plugin {
 	});
 	private clearClipboardTimeouts: number[] = [];
 	private effects: StopEffect[] = [];
+	private pendingSettingsSave = Promise.resolve();
 
 
 	get settings(): DeepReadonly<VaultCryptSettings> {
@@ -88,6 +91,7 @@ export default class VaultCryptPlugin extends Plugin {
 	sessionService!: UnlockSessionService;
 	keyringService!: KeyringService;
 	secretStorageService!: SecretStorageService;
+	vaultImport!: VaultImportFlow;
 	lastUsedProfileId = '';
 	private editorExtension?: Extension;
 
@@ -122,12 +126,6 @@ export default class VaultCryptPlugin extends Plugin {
 
 		// Ensure the VaultCrypt directory exists
 		await this.profileService.ensureVaultCryptDir();
-
-		// Warn once if the vault directory is hidden and Obsidian Sync won't include it
-		if (!this.settings.general.hasSeenSyncWarning &&
-			this.settings.general.vaultCryptDir.startsWith('.')) {
-			new SyncWarningModal(this.app, this).open();
-		}
 
 		// Wire session events → sync runtime state + update UI
 		this.sessionService.onUnlock(id => {
@@ -365,6 +363,7 @@ export default class VaultCryptPlugin extends Plugin {
 		});
 
 		// Settings tab
+		this.vaultImport = new VaultImportFlow(this);
 		this.addSettingTab(new VaultCryptSettingTab(this.app, this));
 
 		this.effects = [
@@ -388,6 +387,13 @@ export default class VaultCryptPlugin extends Plugin {
 			})
 		];
 
+		// Wait for the sync notice before scanning the directory it may move.
+		const scanForExistingVaults = () => this.vaultImport.registerStartupScan();
+		if (!this.settings.general.hasSeenSyncWarning && this.settings.general.vaultCryptDir.startsWith('.')) {
+			new SyncWarningModal(this.app, this, scanForExistingVaults).open();
+		} else {
+			scanForExistingVaults();
+		}
 	}
 
 	onunload() {
@@ -459,6 +465,11 @@ export default class VaultCryptPlugin extends Plugin {
 
 	async addProfile(name: string, password: string, version: KdbxVersion): Promise<void> {
 		await this.profileService?.addProfile(name, password, version);
+		this.initRuntimeState();
+	}
+
+	async importVaults(directory: string, selections: VaultImportSelection[], signal: AbortSignal): Promise<void> {
+		await this.profileService.importVaults(directory, selections, signal);
 		this.initRuntimeState();
 	}
 
@@ -582,7 +593,7 @@ export default class VaultCryptPlugin extends Plugin {
 	}
 
 	private dispatchSaveSettings(settings: DeepReadonly<VaultCryptSettings>) {
-		this.saveSettings(settings).then(() => {
+		this.pendingSettingsSave = this.pendingSettingsSave.then(() => this.saveSettings(settings)).then(() => {
 			console.debug('[VaultCrypt] Settings saved successfully');
 		}, (err) => {
 			console.error('Error saving settings:', err);
