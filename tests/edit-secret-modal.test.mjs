@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, Setting, Notice, TFile, kdbxweb, signal, tick} =
+const {EditSecretModal, InsertSecretModal, UnlockSessionService, parseVcTokens, parseLiveTableReference, Setting, Notice, TFile, kdbxweb, signal, tick} =
 	await loadObsidianRuntime(`
 		export {EditSecretModal} from './src/modals/edit-secret-modal.ts';
 		export {InsertSecretModal} from './src/modals/insert-secret-modal.ts';
 		export {UnlockSessionService} from './src/unlock-session.ts';
 		export {parseVcTokens} from './src/inline-parser.ts';
+		export {parseLiveTableReference} from './src/live-table-reference.ts';
 		export {Setting, Notice, TFile} from 'obsidian';
 		export * as kdbxweb from 'kdbxweb';
 		export {signal, tick} from '@maverick-js/signals';
@@ -120,7 +121,7 @@ async function fixture(t, {raw = '{{vc:test/NewGroup/Nested/Entry}}', defaultFie
 }
 
 test('inserts a standalone table of explicit secret and attachment references without reading values', async t => {
-	const entryPath = 'Accounts/_Work_/Mail';
+	const entryPath = 'Work Accounts/_Mail_/Email Login';
 	const f = await fixture(t, {
 		raw: `{{vc:test/${entryPath}}}`, defaultField: 'Api_Key',
 		existing: {Password: 'secret', Api_Key: '', 'Unsupported|Field': 'private'},
@@ -144,9 +145,9 @@ test('inserts a standalone table of explicit secret and attachment references wi
 	assert.ok(markdown.includes(`\`{{vc:test/${entryPath}#Api_Key}}\``));
 	assert.deepEqual(parseVcTokens(markdown).map(token => [token.entryPath, token.fieldName]), [
 		[entryPath, 'UserName'], [entryPath, 'Password'], [entryPath, 'URL'],
-		[entryPath, 'Notes'], [entryPath, 'Api_Key'], [entryPath, 'attachment:guide.txt'],
+		[entryPath, 'Notes'], [entryPath, 'Api_Key'], [entryPath, 'attachment:guide.txt'], [entryPath, 'attachment:guide draft.txt'],
 	]);
-	assert.doesNotMatch(markdown, /secret|private|Unsupported|draft/);
+	assert.doesNotMatch(markdown, /secret|private|Unsupported/);
 	assert.equal(readValue.mock.callCount(), 0);
 	assert.equal(f.writes(), writesBeforeInsert);
 	assert.equal(f.plugin.lastUsedProfileId, 'test');
@@ -166,7 +167,7 @@ test('an entry that becomes unavailable while selecting it leaves the note uncha
 });
 
 test('live insertion writes a single entry reference and edits leave the note intact', async t => {
-	const raw = '{{vc:test/Group/Entry#ApiKey}}';
+	const raw = '{{vc:test/Work Accounts/Email Login#ApiKey}}';
 	const f = await fixture(t, {raw, existing: {ApiKey: 'private'}, sourceReference: false});
 	assert.equal(f.row('Reference field'), undefined);
 	Setting.instances.find(row => row.controls[0]?.value === 'ApiKey').controls[2].click();
@@ -180,8 +181,45 @@ test('live insertion writes a single entry reference and edits leave the note in
 	const insert = f.openInsert('live-table', {lines: ['Before', '', 'After'], cursor: {line: 1, ch: 0}});
 	insert.selectEntry(f.token.entryPath);
 	await insert.submit();
-	assert.deepEqual(f.inserted, ['\n```vaultcrypt-table\ntest/Group/Entry\n```\n']);
+	assert.deepEqual(f.inserted, ['\n```vaultcrypt-table\ntest/Work Accounts/Email Login\n```\n']);
+	assert.equal(parseLiveTableReference(' test/Work Accounts/Email Login \n').entryPath, f.token.entryPath);
 	assert.equal(f.writes(), writes);
+});
+
+test('inserts and resolves an attachment reference with spaces in the path and filename', async t => {
+	const entryPath = 'Client Devices/User 1/Recovery  Keys';
+	const filename = 'BitLocker Recovery Key 00000000-0000-0000-0000-000000000000.TXT';
+	const f = await fixture(t, {raw: `{{vc:test/${entryPath}}}`, existing: {Password: 'secret'}});
+	const data = Uint8Array.of(42).buffer;
+	await f.service.setAttachment('test', entryPath, filename, data, 'test.kdbx');
+	const devices = f.service.getEntryTree('test').groups.find(group => group.name === 'Client Devices');
+	const user = devices?.groups.find(group => group.name === 'User 1');
+	assert.equal(user?.entries[0]?.path, entryPath);
+	const insert = f.openInsert();
+	insert.selectEntry(entryPath);
+	const fieldName = `attachment:${filename}`;
+	const dropdown = f.row('Reference field').controls[0];
+	assert.ok(fieldName in dropdown.options);
+	dropdown.change(fieldName);
+	await insert.submit();
+	const raw = `{{vc:test/${entryPath}#${fieldName}}}`;
+	assert.deepEqual(f.inserted, [raw]);
+	assert.deepEqual(parseVcTokens(`before ${raw} after`), [
+		{raw, profileId: 'test', entryPath, fieldName, from: 7, to: 7 + raw.length},
+	]);
+	assert.deepEqual(f.service.getAttachment('test', entryPath, filename), data);
+});
+
+test('live table insertion preserves a trailing space in the entry title', async t => {
+	const entryPath = 'Work Accounts/Email Login ';
+	const raw = `{{vc:test/${entryPath}}}`;
+	const f = await fixture(t, {raw, existing: {Password: 'secret'}});
+	const insert = f.openInsert('live-table');
+	insert.selectEntry(entryPath);
+	await insert.submit();
+	assert.equal(f.inserted.length, 1);
+	const [, reference] = f.inserted[0].split('\n');
+	assert.equal(parseLiveTableReference(reference).entryPath, entryPath);
 });
 
 test('creation keeps blank standard and custom fields and their selected reference', async t => {
@@ -213,11 +251,13 @@ test('clearing existing fields saves empty strings while removing a custom row d
 	assert.equal(f.note(), f.token.raw);
 });
 
-test('insert form offers and saves named custom fields with empty values', async t => {
+test('insert form creates a group and entry with spaces and preserves empty fields', async t => {
 	const f = await fixture(t);
 	const insert = f.openInsert();
-	insert.selectNewEntry('Group');
-	f.edit('Entry name (required)', 'Blank');
+	insert.confirmInlineGroupCreate('Work Accounts', '');
+	assert.ok(insert.virtualGroupPaths.has('Work Accounts'));
+	insert.selectNewEntry('Work Accounts');
+	f.edit('Entry name (required)', 'Email Login');
 	Setting.instances.flatMap(row => row.controls).find(control => control.text === 'Add custom field').click();
 	const custom = Setting.instances.find(row => row.parent === insert.customFieldsContainerEl);
 	custom.controls[0].change('ApiKey');
@@ -226,8 +266,10 @@ test('insert form offers and saves named custom fields with empty values', async
 	dropdown.change('ApiKey');
 	await insert.submit();
 	assert.equal(insert.closed, true);
-	assert.deepEqual(f.inserted, ['{{vc:test/Group/Blank#ApiKey}}']);
-	for (const name of ['Password', 'UserName', 'URL', 'ApiKey']) assert.equal(f.service.getFieldValue('test', 'Group/Blank', name), '');
+	assert.deepEqual(f.inserted, ['{{vc:test/Work Accounts/Email Login#ApiKey}}']);
+	for (const name of ['Password', 'UserName', 'URL', 'ApiKey']) {
+		assert.equal(f.service.getFieldValue('test', 'Work Accounts/Email Login', name), '');
+	}
 });
 
 test('insert form offers empty fields on existing entries', async t => {

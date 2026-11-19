@@ -1,8 +1,16 @@
-export const VC_TOKEN_REGEX = /\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_\-/]+?)(?:#([a-zA-Z0-9_\-.:]+))?}}/g;
 export const ATTACHMENT_PREFIX = 'attachment:';
+const ATTACHMENT_NAME_PATTERN = /[a-zA-Z0-9_.: -]*/.source;
+export const VALID_ATTACHMENT_NAME = new RegExp('^' + ATTACHMENT_NAME_PATTERN + '$');
+export const VC_TOKEN_REGEX = new RegExp(
+	String.raw`\{\{vc:([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_/ -]+)(?:#(${ATTACHMENT_PREFIX}${ATTACHMENT_NAME_PATTERN}|[a-zA-Z0-9_.:-]+))?}}`,
+	'g',
+);
 
-/** Matches a single valid token segment (profile id, path part, or field name). */
+/** Matches a standard or custom field name. */
 export const VALID_TOKEN_SEGMENT = /^[a-zA-Z0-9_\-.:]+$/;
+
+/** Matches a group or entry name with at least one non-space character. */
+export const VALID_PATH_SEGMENT = /^ *[a-zA-Z0-9_-][a-zA-Z0-9_ -]*$/;
 
 export interface ParsedVcToken {
 	raw: string;

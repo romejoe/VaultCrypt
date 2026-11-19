@@ -7,14 +7,9 @@ import {GeneratePasswordModal} from './generate-password-modal';
 import {DeepReadonly} from "../utils";
 import {html, render, nothing, TemplateResult} from 'lit-html';
 import {ref} from 'lit-html/directives/ref.js';
-import {ATTACHMENT_PREFIX, VALID_TOKEN_SEGMENT} from '../inline-parser';
+import {ATTACHMENT_PREFIX, VALID_PATH_SEGMENT, VALID_TOKEN_SEGMENT} from '../inline-parser';
 import {buildEntryTable, insertMarkdownBlock} from '../entry-table';
 import {buildLiveTableBlock} from '../live-table-reference';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Characters allowed in a single path segment (group name or entry title) per inline-parser. */
-const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 // ── Insert Secret Modal ───────────────────────────────────────────────────────
 
@@ -412,7 +407,7 @@ export class InsertSecretModal extends Modal {
 		if (name && VALID_PATH_SEGMENT.test(name)) {
 			this.addVirtualGroup(parentPath, name);
 		} else if (name) {
-			new Notice('Group name can only contain letters, digits, hyphens, and underscores');
+			new Notice('Group name can only contain letters, digits, spaces, hyphens, and underscores');
 			this.renderTree();
 		} else {
 			this.renderTree();
@@ -466,7 +461,7 @@ export class InsertSecretModal extends Modal {
 					.onChange(value => {
 						this.entryName = value;
 						if (value && !VALID_PATH_SEGMENT.test(value)) {
-							this.entryNameErrorEl.textContent = 'Entry name can only contain letters, digits, hyphens, and underscores';
+							this.entryNameErrorEl.textContent = 'Entry name can only contain letters, digits, spaces, hyphens, and underscores';
 							this.entryNameErrorEl.removeClass('vaultcrypt-hidden');
 						} else {
 							this.entryNameErrorEl.addClass('vaultcrypt-hidden');
@@ -825,12 +820,12 @@ export class InsertSecretModal extends Modal {
 			}
 
 			if (this.newEntryGroupPath !== null) {
-				if (!this.entryName) {
+				if (!this.entryName.trim()) {
 					this.showError('Entry name is required.');
 					return;
 				}
 				if (!VALID_PATH_SEGMENT.test(this.entryName)) {
-					this.showError('Entry name can only contain letters, digits, hyphens, and underscores.');
+					this.showError('Entry name can only contain letters, digits, spaces, hyphens, and underscores.');
 					return;
 				}
 				const cfError = this.validateCustomFields();
