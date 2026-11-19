@@ -26,6 +26,15 @@ use an in-memory host; no real saved credentials or vault notes are accessed.
 Further race checks pause note, keyring, and profile reads to verify that
 unload or **Lock all** prevents late unlocks and password fallback. Notices use
 the current session state when another profile finishes unlocking.
+Note checks capture the lock generation before queuing and reading. Tests
+cover stale queued/read requests, fresh requests for the same note after a
+lock, and deduplication while an older request finishes. Manual keyring tests
+pause keyring and profile decryption to verify cancellation stops the entire
+batch and its completion callback, while normal successes and partial
+password failures are counted correctly.
+
+Creation-form checks reject leading, trailing, and repeated path separators
+without writing a database or creating groups, including repeated attempts.
 
 Field-name checks cover periods, colons, and `__proto__` across both forms,
 reference selection, and real KDBX reopening. Custom field names cannot use

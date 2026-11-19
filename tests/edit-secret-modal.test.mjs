@@ -278,6 +278,21 @@ test('cancelling creation does not create entries, groups, or writes', async t =
 	assert.equal(f.writes(), 0);
 });
 
+for (const path of ['Group//Entry', '/Entry', 'Group/']) {
+	test(`creation form rejects an entry path with empty segments: ${path}`, async t => {
+		const f = await fixture(t, {raw: `{{vc:test/${path}}}`});
+		f.edit('Password', 'unsaved');
+		await f.modal.submit();
+		assert.match(f.modal.errorEl.textContent, /Invalid entry path/);
+		assert.equal(f.modal.closed, false);
+		assert.equal(f.writes(), 0);
+		assert.equal(f.db.getDefaultGroup().groups.some(group => group.name === 'Group'), false);
+		assert.equal(f.db.getDefaultGroup().entries.length, 0);
+		await f.modal.submit();
+		assert.equal(f.writes(), 0);
+	});
+}
+
 test('creation refuses to overwrite an entry added while the form was open', async t => {
 	const f = await fixture(t);
 	f.edit('Password', 'must not replace');

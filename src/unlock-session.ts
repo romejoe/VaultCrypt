@@ -548,9 +548,9 @@ export class UnlockSessionService {
 	 * Sets the Title field to the last path segment.
 	 */
 	private resolveOrCreateEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry {
-		const segments = entryPath.split('/').filter(s => s.length > 0);
-		if (segments.length === 0) {
-			throw new Error(`Invalid entry path: "${entryPath}" — path must contain at least an entry name`);
+		const segments = entryPath.split('/');
+		if (segments.some(segment => !VALID_PATH_SEGMENT.test(segment))) {
+			throw new Error(`Invalid entry path: "${entryPath}" — each group and entry name must contain only letters, digits, hyphens, and underscores`);
 		}
 		const title = segments[segments.length - 1]!;
 		const groupSegments = segments.slice(0, -1);

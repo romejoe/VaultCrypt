@@ -203,6 +203,8 @@ export class KeyringUnlockModal extends Modal {
 
 		const submittedPassword = this.password;
 		const remember = this.rememberPassword;
+		const generation = this.plugin.sessionService.getLockGeneration();
+		const cancelled = () => this.plugin.sessionService.getLockGeneration() !== generation;
 
 		this.isSubmitting = true;
 		this.submitBtn.setDisabled(true);
@@ -220,21 +222,29 @@ export class KeyringUnlockModal extends Modal {
 			);
 
 			const failures: string[] = [];
+			const unlockedIds: string[] = [];
 			for (const [profileId, profilePassword] of passwords) {
+				if (cancelled()) break;
 				const config = settings.profiles[profileId];
 				if (!config) continue;
 				try {
 					await this.plugin.sessionService.unlockProfile(profileId, config, profilePassword);
+					unlockedIds.push(profileId);
 				} catch {
+					if (cancelled()) break;
 					failures.push(profileId);
 				}
+			}
+			if (cancelled()) {
+				this.showError('Unlock cancelled because profiles were locked.');
+				return;
 			}
 
 			if (failures.length > 0) {
 				new Notice(`Failed to unlock: ${failures.join(', ')}. Stored passwords may be out of date.`);
 			}
 
-			const unlocked = passwords.size - failures.length;
+			const unlocked = unlockedIds.filter(id => this.plugin.sessionService.isUnlocked(id)).length;
 			if (unlocked > 0) {
 				new Notice(`Unlocked ${unlocked} profile${unlocked !== 1 ? 's' : ''} via keyring.`);
 			}
@@ -247,6 +257,10 @@ export class KeyringUnlockModal extends Modal {
 			this.close();
 			this.onDone?.();
 		} catch (e) {
+			if (cancelled()) {
+				this.showError('Unlock cancelled because profiles were locked.');
+				return;
+			}
 			console.error(e);
 			this.showError("Incorrect master password or corrupted keyring.");
 		} finally {

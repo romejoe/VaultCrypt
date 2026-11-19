@@ -7,20 +7,24 @@ import {KeyringUnlockModal, UnlockModal} from './modals';
 export function registerNoteUnlock(plugin: VaultCryptPlugin): void {
 	let active = true;
 	let queue = Promise.resolve();
-	const pending = new Map<string, Promise<void>>();
+	const pending = new Map<string, {generation: number; task: Promise<void>}>();
 	plugin.register(() => { active = false; });
 
 	const checkFile = (file: TFile | null): Promise<void> => {
 		if (!active || !file || file.extension !== 'md') return Promise.resolve();
+		const generation = plugin.sessionService.getLockGeneration();
+		const isCurrent = () => active && plugin.sessionService.getLockGeneration() === generation;
 		const existing = pending.get(file.path);
-		if (existing) return existing;
-		const task = queue.then(async () => {
-			if (!active) return;
-			await unlockNoteProfiles(plugin, file, () => active);
+		if (existing?.generation === generation) return existing.task;
+		const task: Promise<void> = queue.then(async () => {
+			if (!isCurrent()) return;
+			await unlockNoteProfiles(plugin, file, isCurrent);
 		}).catch(error => {
 			console.error('[VaultCrypt] Could not check note for locked profiles', error);
-		}).finally(() => { pending.delete(file.path); });
-		pending.set(file.path, task);
+		}).finally(() => {
+			if (pending.get(file.path)?.task === task) pending.delete(file.path);
+		});
+		pending.set(file.path, {generation, task});
 		queue = task;
 		return task;
 	};

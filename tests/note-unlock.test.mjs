@@ -28,6 +28,7 @@ function fixture(t, {autoUnlock = true, managed = true, keyringEnabled = true} =
 	t.mock.method(console, 'error', () => {});
 	Notice.instances.length = 0;
 	const secrets = new Map(), unlocked = new Set(), unlocks = [], keyringReads = [], reads = [];
+	let generation = 0;
 	const events = new Map(), layoutCallbacks = [], cleanups = [];
 	const activeFile = {path: 'active.md', extension: 'md'};
 	const contents = new Map([['active.md', '{{vc:test/Entry}}']]);
@@ -45,7 +46,8 @@ function fixture(t, {autoUnlock = true, managed = true, keyringEnabled = true} =
 		vault: {read: async file => {reads.push(file.path); return contents.get(file.path) ?? ''; }},
 	};
 	const sessionService = {
-		getLockGeneration: () => 0,
+		getLockGeneration: () => generation,
+		lockAll: () => {generation++; unlocked.clear();},
 		isUnlocked: id => unlocked.has(id),
 		unlockProfile: async (id, config, password) => {
 			unlocks.push(id);
@@ -78,6 +80,70 @@ function fixture(t, {autoUnlock = true, managed = true, keyringEnabled = true} =
 		buttons: () => Notice.instances.flatMap(notice => notice.buttons.map(button => button.text)),
 	};
 }
+
+test('lockAll cancels a note check before its queued work starts', async t => {
+	const f = fixture(t);
+	f.saved.saveKeyringPassword('keyring-password');
+	const opening = f.open();
+	f.sessionService.lockAll();
+	await opening;
+	assert.deepEqual(f.reads, []);
+	assert.deepEqual(f.unlocks, []);
+	assert.deepEqual(Notice.instances, []);
+});
+
+for (const queued of [false, true]) {
+	test(`lockAll during a note read cancels ${queued ? 'that read and an already queued note' : 'that check'}`, async t => {
+		const f = fixture(t);
+		f.saved.saveKeyringPassword('keyring-password');
+		let finish, started;
+		const gate = new Promise(resolve => {finish = resolve;});
+		const beginning = new Promise(resolve => {started = resolve;});
+		t.mock.method(f.app.vault, 'read', async file => {
+			f.reads.push(file.path); started(); await gate; return '{{vc:test/Entry}}';
+		});
+		const opening = f.open();
+		await beginning;
+		const next = queued ? f.open('next.md', '{{vc:test/Entry}}') : Promise.resolve();
+		f.sessionService.lockAll();
+		finish();
+		await Promise.all([opening, next]);
+		assert.deepEqual(f.reads, ['active.md']);
+		assert.deepEqual(f.unlocks, []);
+		assert.deepEqual(f.keyringReads, []);
+		assert.deepEqual(Notice.instances, []);
+	});
+}
+
+test('a new same-file request after lockAll runs independently and keeps its own deduplication', async t => {
+	const f = fixture(t);
+	f.saved.saveKeyringPassword('keyring-password');
+	const gates = [], beginnings = [];
+	for (let i = 0; i < 2; i++) {
+		let finish, started;
+		const gate = new Promise(resolve => {finish = resolve;});
+		const beginning = new Promise(resolve => {started = resolve;});
+		gates.push({gate, finish}); beginnings.push({beginning, started});
+	}
+	let reads = 0;
+	t.mock.method(f.app.vault, 'read', async () => {
+		const index = reads++;
+		if (index < 2) {beginnings[index].started(); await gates[index].gate;}
+		return '{{vc:test/Entry}}';
+	});
+	const stale = f.open();
+	await beginnings[0].beginning;
+	f.sessionService.lockAll();
+	const fresh = f.open();
+	gates[0].finish();
+	await beginnings[1].beginning;
+	const duplicate = f.open();
+	gates[1].finish();
+	await Promise.all([stale, fresh, duplicate]);
+	assert.equal(reads, 2);
+	assert.deepEqual(f.unlocks, ['test']);
+	assert.deepEqual(f.buttons(), []);
+});
 
 test('auto-unlocks the restored active note using the remembered keyring password', async t => {
 	const f = fixture(t);
