@@ -26,6 +26,12 @@ Reference secrets in your Markdown notes with tokens like `{{vc:profileId/path/t
 - `Group/Entry` — path to the KeePass entry
 - `FieldName` — field on that entry (e.g. `Password`, `UserName`, or a custom field)
 
+Use spaces directly in group names, entry titles, and attachment filenames. Reference an attachment with `#attachment:` followed by its filename.
+
+```
+{{vc:profileId/Client Devices/Recovery Keys#attachment:BitLocker Recovery Key.txt}}
+```
+
 ### Workflow
 
 1. Create a profile or import an existing `.kdbx` database in **Settings → VaultCrypt**.

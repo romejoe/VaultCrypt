@@ -1,5 +1,5 @@
 import type {Editor} from 'obsidian';
-import {ATTACHMENT_PREFIX, parseVcTokens, VALID_TOKEN_SEGMENT} from './inline-parser';
+import {ATTACHMENT_PREFIX, parseVcTokens, VALID_ATTACHMENT_NAME, VALID_TOKEN_SEGMENT} from './inline-parser';
 
 export function buildEntryTable(
 	profileId: string,
@@ -23,9 +23,9 @@ export function buildEntryTable(
 }
 
 export function getEntryTableFields(fieldNames: readonly string[], attachmentNames: readonly string[]): string[] {
-	const fields = fieldNames.filter(name => name !== 'Title' && !name.startsWith(ATTACHMENT_PREFIX));
-	return [...fields, ...attachmentNames.map(name => `${ATTACHMENT_PREFIX}${name}`)]
-		.filter(name => VALID_TOKEN_SEGMENT.test(name));
+	const fields = fieldNames.filter(name => name !== 'Title' && !name.startsWith(ATTACHMENT_PREFIX) && VALID_TOKEN_SEGMENT.test(name));
+	const attachments = attachmentNames.filter(name => VALID_ATTACHMENT_NAME.test(name));
+	return [...fields, ...attachments.map(name => `${ATTACHMENT_PREFIX}${name}`)];
 }
 
 export function insertMarkdownBlock(editor: Editor, markdown: string): void {

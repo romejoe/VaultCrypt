@@ -188,7 +188,7 @@ test('keyring unlock on note switching opens only referenced managed profiles', 
 	const f = fixture(t);
 	f.settings.profiles.other = {path: 'other.kdbx', managedByKeyring: true};
 	f.saved.saveKeyringPassword('keyring-password');
-	await f.open('next.md', '{{vc:test/Entry#attachment:file.txt}}');
+	await f.open('next.md', '{{vc:test/Work Accounts/Email Login#attachment:Recovery Key.txt}}');
 	assert.deepEqual(f.keyringReads, [['test']]);
 	assert.deepEqual(f.unlocks, ['test']);
 });

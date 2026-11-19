@@ -43,10 +43,11 @@ const {outputFiles} = await build({
       document.querySelector('#table-fixture')?.remove();
       window.logs = [];
       const settings = {profiles: {test: {defaultField: 'Password', path: 'test.kdbx'}}, general: {compactChips: false, autoUnmask: true, saveOnBlur: false, ...options}, security: {clipboardClearSeconds: 0}};
-      window.copied = null; window.saved = null; window.savedAttachment = null;
+      window.copied = null; window.saved = null; window.savedAttachment = null; window.attachmentLookup = null;
+      const reference = options.reference ?? ('{{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}}');
       const fieldValue = signal(options.missing || options.missingField ? null : options.empty ? '' : 'sample value');
       window.updateField = value => {fieldValue.set(value);tick();};
-      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => fieldValue(), getEntryFields: () => options.missing ? null : ({}), getAttachment: () => new TextEncoder().encode('sample attachment'), getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];fieldValue.set(args[3]);}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
+      const plugin = {settings, settings$: signal(settings), vaultCryptState: {profiles: []}, vaultCryptState$: signal({profiles: [{id: 'test', isLocked: !!options.locked}]}), sessionService: {isUnlocked: () => !options.locked, getFieldValue: () => fieldValue(), getEntryFields: () => options.missing ? null : ({}), getAttachment: (...args) => {window.attachmentLookup = args;return new TextEncoder().encode('sample attachment');}, getEntryTree: () => null, setFieldValue: async (...args) => {window.saved = args[3];fieldValue.set(args[3]);}}, app: {vault: {getAbstractFileByPath: () => ({}), createBinary: async path => {window.savedAttachment = path;}}}};
       window.copyChipSelection = () => {
         const range=document.createRange();range.selectNode(document.querySelector('[data-vc-chip]'));
         return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
@@ -57,7 +58,7 @@ const {outputFiles} = await build({
         const range=document.createRange();range.selectNodeContents(selector?container.querySelector(selector):container);
         return buildCopyTextFromSelection({rangeCount:1,getRangeAt:()=>range},plugin);
       };
-      view = new EditorView({parent: document.querySelector('#editor'), state: EditorState.create({doc: 'Before {{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}} after', extensions: [editorLivePreviewField, buildEditorExtension(plugin), EditorView.updateListener.of(update => { if (update.selectionSet) window.logs.push({event: 'CM selection', head: update.state.selection.main.head}); })]})});
+      view = new EditorView({parent: document.querySelector('#editor'), state: EditorState.create({doc: 'Before ' + reference + ' after', extensions: [editorLivePreviewField, buildEditorExtension(plugin), EditorView.updateListener.of(update => { if (update.selectionSet) window.logs.push({event: 'CM selection', head: update.state.selection.main.head}); })]})});
       view.focus();
       tick();
       window.view = view;
@@ -70,7 +71,7 @@ const {outputFiles} = await build({
       if (options.table) {
         view.destroy();
         const table = document.createElement('table');table.id='table-fixture';
-        const cell=table.insertRow().insertCell();cell.style.padding='12px';cell.textContent='cell {{vc:test/entry' + (options.attachment ? '#attachment:sample.txt' : '') + '}} outside';
+        const cell=table.insertRow().insertCell();cell.style.padding='12px';cell.textContent='cell ' + reference + ' outside';
         window.tableActivations=0;cell.addEventListener('pointerdown',()=>{window.tableActivations++;});
         document.body.append(table);processVcTokensInDom(table, token=>buildChipElement(token,plugin));tick();
       }
@@ -167,10 +168,21 @@ try {
   await cdp('Runtime.enable');
   await cdp('Page.navigate', {url: pathToFileURL(join(directory, 'probe.html')).href});
   await delay(1000);
+  {
+    const entryPath = 'Client Devices/User 1/Recovery  Keys';
+    const filename = 'BitLocker Recovery Key.txt';
+    const reference = '{{vc:test/' + entryPath + '#attachment:' + filename + '}}';
+    for (const table of [false, true]) {
+      await evaluate('window.reset(' + JSON.stringify({table, reference}) + ')');
+      assert.equal(await evaluate('document.querySelector("[data-vc-chip]").dataset.vcCopyText'), reference);
+      assert.deepEqual(await evaluate('window.attachmentLookup'), ['test', entryPath, filename]);
+    }
+    console.log('PASS attachment references with spaces render in CodeMirror and post-processed Markdown');
+  }
   await evaluate('window.reset({liveTable: true})');
   assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password']);
-  await evaluate('window.updateLiveRows(["Title", "Password", "Api_Key"], ["guide.txt"])');
-  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password', 'Api_Key', 'attachment:guide.txt']);
+  await evaluate('window.updateLiveRows(["Title", "Password", "Api_Key"], ["guide draft.txt"])');
+  assert.deepEqual(await evaluate('window.liveRowLabels()'), ['Password', 'Api_Key', 'attachment:guide draft.txt']);
   assert.equal(await evaluate('document.querySelector("#table-fixture [data-vc-chip]") === window.initialLiveChip'), true);
   await evaluate('window.updateField("updated value")');
   assert.equal(await evaluate('window.initialLiveChip.dataset.vcCopyText'), 'updated value');

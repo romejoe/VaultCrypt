@@ -3,7 +3,8 @@ import {parseVcTokens, type ParsedVcToken} from './inline-parser';
 export const LIVE_TABLE_LANGUAGE = 'vaultcrypt-table';
 
 export function parseLiveTableReference(source: string): ParsedVcToken | null {
-	const raw = `{{vc:${source.trim()}}}`;
+	const reference = source.trim();
+	const raw = reference.startsWith('{{vc:') ? reference : `{{vc:${reference}}}`;
 	const token = parseVcTokens(raw)[0];
 	if (token?.raw !== raw || token.fieldName !== null || token.entryPath.split('/').some(segment => !segment)) return null;
 	return token;
@@ -11,9 +12,11 @@ export function parseLiveTableReference(source: string): ParsedVcToken | null {
 
 export function buildLiveTableBlock(profileId: string, entryPath: string): string | null {
 	const entry = `${profileId}/${entryPath}`;
-	const token = parseLiveTableReference(entry);
+	// Closing braces preserve trailing spaces in a title when the block is trimmed.
+	const reference = entryPath.endsWith(' ') ? `{{vc:${entry}}}` : entry;
+	const token = parseLiveTableReference(reference);
 	if (token?.profileId !== profileId || token.entryPath !== entryPath) return null;
-	return ['```' + LIVE_TABLE_LANGUAGE, entry, '```'].join('\n');
+	return ['```' + LIVE_TABLE_LANGUAGE, reference, '```'].join('\n');
 }
 
 /** Find live table references in standalone fenced blocks when opening a note. */

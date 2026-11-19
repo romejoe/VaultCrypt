@@ -4,11 +4,9 @@ import * as kdbxweb from 'kdbxweb';
 import {ProfileConfig} from './settings';
 import {signal, untrack, type WriteSignal} from '@maverick-js/signals';
 import {ProfileMutationQueue} from './profile-mutation-queue';
+import {VALID_PATH_SEGMENT} from './inline-parser';
 
 const PROTECTED_FIELDS = new Set(['Password']);
-
-/** Characters allowed in a single path segment (group or entry name) for inline-token parsing. */
-const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
 
 type LockCallback = (profileId: string) => void;
 type UnlockCallback = (profileId: string) => void;
@@ -569,7 +567,7 @@ export class UnlockSessionService {
 	private resolveOrCreateEntry(db: kdbxweb.Kdbx, entryPath: string): kdbxweb.KdbxEntry {
 		const segments = entryPath.split('/');
 		if (segments.some(segment => !VALID_PATH_SEGMENT.test(segment))) {
-			throw new Error(`Invalid entry path: "${entryPath}" — each group and entry name must contain only letters, digits, hyphens, and underscores`);
+			throw new Error(`Invalid entry path: "${entryPath}" — each group and entry name must contain only letters, digits, spaces, hyphens, and underscores`);
 		}
 		const title = segments[segments.length - 1]!;
 		const groupSegments = segments.slice(0, -1);

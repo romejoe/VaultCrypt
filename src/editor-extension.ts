@@ -110,7 +110,7 @@ function flattenTreeToCompletions(
 
 function vcCompletionSource(plugin: VaultCryptPlugin) {
 	return (context: CompletionContext): CompletionResult | null => {
-		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_\-/]*(?:#[a-zA-Z0-9_-]*)?\w*/);
+		const before = context.matchBefore(/\{\{vc:[a-zA-Z0-9_-]*(?:\/[a-zA-Z0-9_/ -]*(?:#[a-zA-Z0-9_.:-]*)?)?/);
 		if (!before || (before.from === before.to && !context.explicit)) return null;
 
 		let options: Completion[] = [];
