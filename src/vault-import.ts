@@ -1,5 +1,5 @@
 import type {App, Stat} from 'obsidian';
-import {BinaryStream, Kdbx, KdbxContext, KdbxHeader} from 'kdbxweb';
+import {BinaryStream, Kdbx, KdbxContext, KdbxError, KdbxHeader} from 'kdbxweb';
 import {KdbxFileError, loadKdbxWithPassword, readKdbxFile} from './kdbx-file';
 import type {KdbxVersion} from './kdbx-service';
 import {MAX_PROFILE_NAME_LENGTH} from './profile-name';
@@ -55,8 +55,11 @@ export async function verifyVaultForImport(app: App, path: string, password: str
 	let db: Kdbx;
 	try {
 		db = await loadKdbxWithPassword(buffer, password);
-	} catch {
-		throw new Error(`Could not open ${path}. Check the password and confirm that it is the database's only credential.`);
+	} catch (error) {
+		const message = error instanceof KdbxError && error.code === 'InvalidKey'
+			? `Could not open ${path}. Check the password and confirm that it is the database's only credential.`
+			: `Could not open ${path}.`;
+		throw Object.assign(new Error(message), {cause: error});
 	}
 	const {versionMajor: version} = db;
 	db.cleanup();

@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {loadObsidianRuntime} from './helpers/obsidian-runtime.mjs';
 
-const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signal, Modal, Notice, TFile, scanForVaults, kdbxweb} =
+const {VaultImportFlow, ProfileService, KdbxService, UnlockSessionService, signal, Modal, Notice, TFile, scanForVaults, verifyVaultForImport, kdbxweb} =
 	await loadObsidianRuntime(`
 		export { VaultImportFlow } from './src/modals/vault-import-modal.ts';
 		export { ProfileService } from './src/profile-service.ts';
 		export { KdbxService } from './src/kdbx-service.ts';
 		export { UnlockSessionService } from './src/unlock-session.ts';
-		export { scanForVaults } from './src/vault-import.ts';
+		export { scanForVaults, verifyVaultForImport } from './src/vault-import.ts';
 		export * as kdbxweb from 'kdbxweb';
 		export { signal } from '@maverick-js/signals';
 		export { Modal, Notice, TFile } from 'obsidian';
@@ -297,3 +297,31 @@ for (const change of ['removed', 'modified']) {
 		assert.deepEqual(Object.keys(f.settings().profiles), ['one', 'two']);
 	});
 }
+
+test('import classifies load failures and preserves the original rejection', async t => {
+	const f = fixture(t);
+	const path = `${f.directory}/broken.kdbx`;
+	f.disk.set(path, new ArrayBuffer(12));
+	for (const original of [
+		new kdbxweb.KdbxError('InvalidKey'),
+		new kdbxweb.KdbxError('FileCorrupt'),
+		new Error('Unsupported crypto'),
+		undefined,
+	]) {
+		const load = t.mock.method(kdbxweb.Kdbx, 'load', async () => { throw original; });
+		try {
+			await assert.rejects(verifyVaultForImport(f.app, path, 'password'), error => {
+				assert.equal(error.cause, original);
+				assert.equal(Object.hasOwn(error, 'cause'), true);
+				if (original instanceof kdbxweb.KdbxError && original.code === 'InvalidKey') {
+					assert.match(error.message, /Check the password.*only credential/);
+				} else {
+					assert.equal(error.message, `Could not open ${path}.`);
+				}
+				return true;
+			});
+		} finally {
+			load.mock.restore();
+		}
+	}
+});
